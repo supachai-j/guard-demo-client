@@ -1,7 +1,7 @@
-import { 
-  AppConfig, 
-  AppConfigUpdate, 
-  ChatRequest, 
+import {
+  AppConfig,
+  AppConfigUpdate,
+  ChatRequest,
   ChatResponse,
   RagGenerateRequest,
   RagGenerateResponse,
@@ -12,7 +12,9 @@ import {
   DemoPrompt,
   DemoPromptCreate,
   DemoPromptUpdate,
-  DemoPromptSearchResponse
+  DemoPromptSearchResponse,
+  ScenarioPreview,
+  ApplyScenarioResponse
 } from '../types';
 
 const API_BASE = '/api';
@@ -222,6 +224,22 @@ class ApiService {
   // Models endpoint
   async getModels(): Promise<{ models: string[] }> {
     return this.request<{ models: string[] }>('/models');
+  }
+
+  // Provider catalog (multi-provider Security tab)
+  async getProviders(): Promise<{ providers: import('../types').ProviderInfo[] }> {
+    return this.request<{ providers: import('../types').ProviderInfo[] }>('/providers');
+  }
+
+  // Scenario (one-click company switcher) endpoints
+  async listScenarios(): Promise<{ scenarios: ScenarioPreview[] }> {
+    return this.request<{ scenarios: ScenarioPreview[] }>('/scenarios');
+  }
+
+  async applyScenario(scenarioId: string): Promise<ApplyScenarioResponse> {
+    return this.request<ApplyScenarioResponse>(`/scenarios/${scenarioId}/apply`, {
+      method: 'POST',
+    });
   }
 }
 

@@ -33,6 +33,14 @@ class AppConfigResponse(AppConfigBase):
     lakera_api_key: Optional[str] = None
     lakera_project_id: Optional[str] = None
     rag_lakera_project_id: Optional[str] = None
+    # Multi-provider fields
+    llm_provider: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    mistral_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    ollama_base_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -45,6 +53,14 @@ class AppConfigUpdate(AppConfigBase):
     rag_lakera_project_id: Optional[str] = None
     use_litellm: Optional[bool] = None
     litellm_base_url: Optional[str] = None
+    # Multi-provider fields
+    llm_provider: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    google_api_key: Optional[str] = None
+    mistral_api_key: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    together_api_key: Optional[str] = None
+    ollama_base_url: Optional[str] = None
 
 
 # Chat schemas

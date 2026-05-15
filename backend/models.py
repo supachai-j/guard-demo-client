@@ -27,6 +27,16 @@ class AppConfig(Base):
     litellm_base_url = Column(String, nullable=True)
     # LiteLLM proxy virtual key (when use_litellm); separate from direct OpenAI key
     litellm_virtual_key = Column(String, nullable=True)
+    # Multi-provider LLM support. llm_provider selects which provider's key/base_url is used at call time;
+    # values: "openai", "anthropic", "google", "mistral", "groq", "together", "ollama", "litellm_proxy".
+    # Keys are stored per provider so switching does not require re-entry.
+    llm_provider = Column(String, nullable=True, default="openai")
+    anthropic_api_key = Column(String, nullable=True)
+    google_api_key = Column(String, nullable=True)
+    mistral_api_key = Column(String, nullable=True)
+    groq_api_key = Column(String, nullable=True)
+    together_api_key = Column(String, nullable=True)
+    ollama_base_url = Column(String, nullable=True)
     # Guardrail names selected by app when using LiteLLM-native Lakera guardrails.
     litellm_guardrail_name = Column(String, nullable=True)
     litellm_guardrail_monitor_name = Column(String, nullable=True)

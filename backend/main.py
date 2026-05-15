@@ -11,6 +11,7 @@ from typing import List, Optional
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,8 @@ from . import lakera, llm_client, rag
 from .agent import AgentRequest, run_agent
 from .database import engine, get_db
 from .models import AppConfig, Base, DemoPrompt, MCPToolCapabilities, RagSource, Tool
+from .providers import list_providers_for_ui
+from .scenarios import SCENARIOS, get_scenario
 from .schemas import (
     AppConfigResponse,
     AppConfigUpdate,
@@ -130,6 +133,43 @@ def _migrate_app_config_litellm_guardrail_fields():
 
 _migrate_app_config_litellm_guardrail_fields()
 
+
+def _migrate_app_config_multi_provider():
+    """Add multi-provider columns + backfill llm_provider from legacy use_litellm flag."""
+    new_columns = {
+        "llm_provider": "VARCHAR",
+        "anthropic_api_key": "VARCHAR",
+        "google_api_key": "VARCHAR",
+        "mistral_api_key": "VARCHAR",
+        "groq_api_key": "VARCHAR",
+        "together_api_key": "VARCHAR",
+        "ollama_base_url": "VARCHAR",
+    }
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(app_config)"))
+        columns = [row[1] for row in r.fetchall()]
+        for name, col_type in new_columns.items():
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE app_config ADD COLUMN {name} {col_type}"))
+                conn.commit()
+        # Backfill llm_provider for existing rows: use_litellm=1 → litellm_proxy, else openai
+        conn.execute(
+            text(
+                """
+                UPDATE app_config
+                SET llm_provider = CASE
+                    WHEN use_litellm = 1 THEN 'litellm_proxy'
+                    ELSE 'openai'
+                END
+                WHERE llm_provider IS NULL OR llm_provider = ''
+                """
+            )
+        )
+        conn.commit()
+
+
+_migrate_app_config_multi_provider()
+
 app = FastAPI(title="Agentic Demo API", description="Backend API for the Agentic Demo application", version="1.0.0")
 
 # CORS middleware
@@ -140,6 +180,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Serve the bundled fake-company brand assets (logos / hero images) used by
+# the one-click scenario loader. Mounted at /static/fakecompanies/...
+_fakecompanies_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fakecompanies")
+if os.path.isdir(_fakecompanies_dir):
+    app.mount("/static/fakecompanies", StaticFiles(directory=_fakecompanies_dir), name="fakecompanies")
 
 
 def _ensure_active_model_valid(config: AppConfig, db: Session) -> None:
@@ -184,14 +230,16 @@ async def update_config(config_update: AppConfigUpdate, db: Session = Depends(ge
     for field, value in config_update.dict(exclude_unset=True).items():
         setattr(config, field, value)
 
-    # Auto-pick model when saving LiteLLM virtual key: if current model invalid for key, set to first allowed
-    use_litellm = getattr(config, "use_litellm", False)
-    if use_litellm and getattr(config, "litellm_virtual_key", None):
-        allowed = llm_client.get_models(config)
-        if allowed and (not config.openai_model or config.openai_model not in allowed):
-            config.openai_model = allowed[0]
-    elif not use_litellm and config.openai_model not in llm_client.STATIC_MODELS:
-        config.openai_model = llm_client.STATIC_MODELS[0]
+    # Keep legacy use_litellm flag in sync with the new provider selector.
+    if config.llm_provider == "litellm_proxy":
+        config.use_litellm = True
+    elif config.llm_provider:
+        config.use_litellm = False
+
+    # Auto-pick a valid model for the active provider when the saved one isn't allowed.
+    allowed = llm_client.get_models(config)
+    if allowed and (not config.openai_model or config.openai_model not in allowed):
+        config.openai_model = allowed[0]
 
     db.commit()
     db.refresh(config)
@@ -1188,10 +1236,84 @@ async def get_rag_scanning_progress():
 
 
 @app.get("/api/models")
-async def get_available_models():
-    """Get available OpenAI models"""
+async def get_available_models(db: Session = Depends(get_db)):
+    """Models available for the active provider (dynamic for proxy/Ollama, else static)."""
+    config = db.query(AppConfig).first()
     try:
-        models = llm_client.get_models()
+        models = llm_client.get_models(config)
         return {"models": models}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get models: {str(e)}") from e
+
+
+@app.get("/api/providers")
+async def get_providers():
+    """Catalog of supported LLM providers for the Admin Console dropdown."""
+    return {"providers": list_providers_for_ui()}
+
+
+# Scenario endpoints — one-click demo company switcher on the Landing page
+_SCENARIO_PREVIEW_FIELDS = (
+    "id",
+    "industry",
+    "business_name",
+    "tagline",
+    "hero_text",
+    "theme",
+    "logo_url",
+    "hero_image_url",
+)
+
+
+@app.get("/api/scenarios")
+async def list_scenarios():
+    """List available one-click demo scenarios (branding-level preview only)."""
+    return {
+        "scenarios": [
+            {field: scenario.get(field) for field in _SCENARIO_PREVIEW_FIELDS}
+            for scenario in SCENARIOS
+        ]
+    }
+
+
+@app.post("/api/scenarios/{scenario_id}/apply")
+async def apply_scenario(scenario_id: str, db: Session = Depends(get_db)):
+    """Apply a scenario: update AppConfig branding/persona and replace demo prompts."""
+    scenario = get_scenario(scenario_id)
+    if not scenario:
+        raise HTTPException(status_code=404, detail=f"Scenario '{scenario_id}' not found")
+
+    config = db.query(AppConfig).first()
+    if not config:
+        config = AppConfig()
+        db.add(config)
+        db.flush()
+
+    config.business_name = scenario["business_name"]
+    config.tagline = scenario["tagline"]
+    config.hero_text = scenario["hero_text"]
+    config.logo_url = scenario["logo_url"]
+    config.hero_image_url = scenario["hero_image_url"]
+    config.theme = scenario["theme"]
+    config.system_prompt = scenario["system_prompt"]
+
+    db.query(DemoPrompt).delete()
+    for prompt in scenario.get("demo_prompts", []):
+        db.add(
+            DemoPrompt(
+                title=prompt["title"],
+                content=prompt["content"],
+                category=prompt.get("category", "general"),
+                tags=prompt.get("tags", []),
+                is_malicious=prompt.get("is_malicious", False),
+                preferred_llm=prompt.get("preferred_llm"),
+            )
+        )
+
+    db.commit()
+    return {
+        "message": f"Scenario '{scenario_id}' applied",
+        "scenario_id": scenario_id,
+        "business_name": scenario["business_name"],
+        "prompts_loaded": len(scenario.get("demo_prompts", [])),
+    }

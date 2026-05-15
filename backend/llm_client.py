@@ -1,44 +1,46 @@
 """
-Unified LLM client that routes to OpenAI or LiteLLM proxy based on config.
-Exposes chat_completion, get_embeddings, get_models with same signatures as openai_client.
+Multi-provider LLM client. All chat + embedding traffic is routed through
+litellm.completion / litellm.embedding so that providers (OpenAI, Anthropic,
+Google, Mistral, Groq, Together, Ollama, self-hosted LiteLLM proxy) share one
+dispatch path, including tool-calling translation.
 """
 import ast
 import copy
-import openai
+from typing import Any, Dict, List, Optional, Union
+
 import httpx
-from typing import List, Dict, Any, Optional, Union
+import litellm
+from litellm import completion as litellm_completion
+from litellm import embedding as litellm_embedding
+from litellm.exceptions import APIConnectionError, BadRequestError
 
 from .database import get_db
 from .models import AppConfig
+from .providers import (
+    PROVIDERS,
+    provider_api_key,
+    provider_base_url,
+    provider_id,
+    provider_static_models,
+    to_litellm_model,
+)
 
-# Timeout for LiteLLM /v1/models request (seconds)
+
+# Timeout for LiteLLM proxy /v1/models request (seconds)
 LITELLM_MODELS_TIMEOUT = 10.0
 
-STATIC_MODELS = [
-    "gpt-5",
-    "gpt-5-mini",
-    "gpt-5-nano",
-    "gpt-4o",
-    "gpt-4o-mini",
-    "gpt-4",
-    "gpt-4-turbo",
-    "gpt-3.5-turbo",
-    "anthropic-claude",
-    "ollama-llama",
-    "ollama-mistral",
-]
+# Kept for backward-compat with existing imports (some callers expect this).
+STATIC_MODELS = provider_static_models("openai")
 
 
 def _supports_custom_temperature(model: str) -> bool:
-    """
-    GPT-5 family currently rejects non-default temperature values on chat completions.
-    """
+    """GPT-5 family rejects non-default temperature on chat completions."""
     name = (model or "").strip().lower()
     return not name.startswith("gpt-5")
 
 
 class LiteLLMGuardrailError(Exception):
-    """Raised when LiteLLM guardrails block a response and return detector details."""
+    """Raised when LiteLLM-proxy guardrails block a response and return detector details."""
 
     def __init__(self, message: str, lakera_status: Optional[Dict[str, Any]] = None):
         super().__init__(message)
@@ -46,10 +48,7 @@ class LiteLLMGuardrailError(Exception):
 
 
 def _normalize_litellm_lakera_message_ids(status: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    LiteLLM Lakera payloads can be offset by +1 vs direct Lakera indexing expected by UI.
-    Shift message_id >= 1 down by one.
-    """
+    """LiteLLM Lakera payloads can be offset by +1 vs direct Lakera indexing."""
     out = copy.deepcopy(status)
 
     def shift_entry(entry: Any) -> None:
@@ -66,63 +65,65 @@ def _normalize_litellm_lakera_message_ids(status: Dict[str, Any]) -> Dict[str, A
     return out
 
 
-def _extract_litellm_guardrail_status(e: openai.APIStatusError) -> Optional[Dict[str, Any]]:
-    """
-    Parse LiteLLM 400 guardrail error payload into a Lakera-shaped status object.
-    """
-    try:
-        payload = e.response.json() if e.response is not None else {}
-    except Exception:
-        payload = {}
-
+def _extract_litellm_guardrail_status(err: Exception) -> Optional[Dict[str, Any]]:
+    """Best-effort extraction of Lakera guardrail details from a litellm error."""
+    response = getattr(err, "response", None)
+    payload: Dict[str, Any] = {}
+    if response is not None:
+        try:
+            payload = response.json() if callable(getattr(response, "json", None)) else {}
+        except Exception:
+            payload = {}
+    if not payload:
+        message_raw = getattr(err, "message", None) or str(err)
+        if isinstance(message_raw, str) and message_raw.strip():
+            try:
+                parsed = ast.literal_eval(message_raw.strip())
+                if isinstance(parsed, dict):
+                    payload = parsed
+            except Exception:
+                pass
+    if not isinstance(payload, dict):
+        return None
     error_obj = payload.get("error") if isinstance(payload, dict) else None
-    if not isinstance(error_obj, dict):
-        return None
-
-    # Preferred shape
-    direct = error_obj.get("lakera_guard_response")
-    if isinstance(direct, dict):
-        return _normalize_litellm_lakera_message_ids(direct)
-
-    # Some LiteLLM errors embed a Python-dict-like string in error.message
-    raw_message = error_obj.get("message")
-    if not isinstance(raw_message, str) or not raw_message.strip():
-        return None
-    try:
-        parsed_obj = ast.literal_eval(raw_message.strip())
-    except Exception:
-        return None
-    if not isinstance(parsed_obj, dict):
-        return None
-    nested = parsed_obj.get("lakera_guardrail_response")
-    if isinstance(nested, dict):
-        return _normalize_litellm_lakera_message_ids(nested)
+    nested = None
+    if isinstance(error_obj, dict):
+        direct = error_obj.get("lakera_guard_response")
+        if isinstance(direct, dict):
+            return _normalize_litellm_lakera_message_ids(direct)
+        raw_message = error_obj.get("message")
+        if isinstance(raw_message, str) and raw_message.strip():
+            try:
+                parsed_obj = ast.literal_eval(raw_message.strip())
+            except Exception:
+                parsed_obj = None
+            if isinstance(parsed_obj, dict):
+                nested = parsed_obj.get("lakera_guardrail_response")
+                if isinstance(nested, dict):
+                    return _normalize_litellm_lakera_message_ids(nested)
+    if isinstance(payload.get("lakera_guard_response"), dict):
+        return _normalize_litellm_lakera_message_ids(payload["lakera_guard_response"])
     return None
 
 
 def effective_llm_api_key(cfg: Optional[AppConfig]) -> Optional[str]:
-    """
-    Bearer / API key for the current mode: direct OpenAI uses openai_api_key;
-    LiteLLM proxy uses litellm_virtual_key (may be empty string if unset).
-    """
-    if not cfg:
-        return None
-    if getattr(cfg, "use_litellm", False):
-        return getattr(cfg, "litellm_virtual_key", None) or ""
-    return cfg.openai_api_key
+    """Bearer / API key for the active provider (None for ones that don't need one)."""
+    return provider_api_key(cfg)
 
 
 def llm_credentials_configured(cfg: Optional[AppConfig]) -> bool:
-    """OpenAI direct mode requires an API key; LiteLLM mode allows an empty virtual key."""
+    """Whether the active provider has enough config to make a call."""
     if not cfg:
         return False
-    if getattr(cfg, "use_litellm", False):
-        return True
-    return bool(cfg.openai_api_key)
+    pid = provider_id(cfg)
+    meta = PROVIDERS.get(pid, {})
+    if meta.get("needs_key"):
+        return bool(provider_api_key(cfg))
+    # ollama / litellm_proxy can run without a key
+    return True
 
 
 def _get_config() -> Optional[AppConfig]:
-    """Load config from database"""
     db = next(get_db())
     try:
         return db.query(AppConfig).first()
@@ -130,80 +131,50 @@ def _get_config() -> Optional[AppConfig]:
         db.close()
 
 
-def _call_openai_chat(
-    messages: List[Dict[str, str]],
+def _build_litellm_kwargs(
+    cfg: Optional[AppConfig],
     model: str,
-    temperature: float,
-    api_key: str,
-    tools: Optional[List[Dict[str, Any]]] = None,
-) -> Dict[str, Any]:
-    """Call OpenAI API directly for chat completion"""
-    client = openai.OpenAI(api_key=api_key)
-    effective_temperature = temperature if _supports_custom_temperature(model) else None
-    params = {
-        "model": model,
-        "messages": messages,
-        "temperature": effective_temperature,
-        "tools": tools,
-        "tool_choice": "auto" if tools else None,
-    }
-    params = {k: v for k, v in params.items() if v is not None}
-    response = client.chat.completions.create(**params)
-    return response.model_dump()
-
-
-def _call_litellm_chat(
+    temperature: Optional[float],
     messages: List[Dict[str, str]],
-    model: str,
-    temperature: float,
-    api_key: str,
-    base_url: str,
     tools: Optional[List[Dict[str, Any]]] = None,
     litellm_guardrail_name: Optional[str] = None,
     litellm_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Call LiteLLM proxy for chat completion (OpenAI-compatible API)"""
-    client = openai.OpenAI(api_key=api_key, base_url=f"{base_url.rstrip('/')}/v1")
-    effective_temperature = temperature if _supports_custom_temperature(model) else None
-    extra_body: Dict[str, Any] = {}
-    if litellm_guardrail_name:
-        # LiteLLM expects guardrails as a list; singular guardrail_name can be forwarded upstream.
-        extra_body["guardrails"] = [litellm_guardrail_name]
-    if litellm_metadata:
-        extra_body["metadata"] = litellm_metadata
-    params = {
-        "model": model,
+    """Build the kwargs passed to litellm.completion for the active provider."""
+    pid = provider_id(cfg)
+    model_str = to_litellm_model(cfg, model)
+    kwargs: Dict[str, Any] = {
+        "model": model_str,
         "messages": messages,
-        "temperature": effective_temperature,
-        "tools": tools,
-        "tool_choice": "auto" if tools else None,
-        "extra_body": extra_body if extra_body else None,
     }
-    params = {k: v for k, v in params.items() if v is not None}
-    response = client.chat.completions.create(**params)
-    return response.model_dump()
+    if temperature is not None and _supports_custom_temperature(model):
+        kwargs["temperature"] = temperature
+    if tools:
+        kwargs["tools"] = tools
+        kwargs["tool_choice"] = "auto"
 
+    api_key = provider_api_key(cfg)
+    if api_key:
+        kwargs["api_key"] = api_key
 
-def _get_embeddings_openai(texts: List[str], api_key: str) -> List[List[float]]:
-    """Get embeddings from OpenAI directly"""
-    client = openai.OpenAI(api_key=api_key)
-    response = client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=texts,
-    )
-    return [embedding.embedding for embedding in response.data]
+    base_url = provider_base_url(cfg)
+    if base_url:
+        kwargs["api_base"] = base_url
 
-
-def _get_embeddings_litellm(
-    texts: List[str], api_key: str, base_url: str
-) -> List[List[float]]:
-    """Get embeddings from LiteLLM proxy"""
-    client = openai.OpenAI(api_key=api_key, base_url=f"{base_url.rstrip('/')}/v1")
-    response = client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=texts,
-    )
-    return [embedding.embedding for embedding in response.data]
+    if pid == "litellm_proxy":
+        # The self-hosted LiteLLM proxy expects OpenAI-style /v1; rewrite api_base accordingly.
+        if base_url and not base_url.rstrip("/").endswith("/v1"):
+            kwargs["api_base"] = f"{base_url.rstrip('/')}/v1"
+        extra_body: Dict[str, Any] = {}
+        if litellm_guardrail_name:
+            extra_body["guardrails"] = [litellm_guardrail_name]
+        if litellm_metadata:
+            extra_body["metadata"] = litellm_metadata
+        if extra_body:
+            kwargs["extra_body"] = extra_body
+        # Force OpenAI-compatible custom provider so LiteLLM proxies through correctly.
+        kwargs["custom_llm_provider"] = "openai"
+    return kwargs
 
 
 def chat_completion(
@@ -215,104 +186,114 @@ def chat_completion(
     litellm_guardrail_name: Optional[str] = None,
     litellm_metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """
-    Send chat completion request. Routes to OpenAI or LiteLLM based on config.
-    temperature: 0-10 scale (converted to 0-1 internally), or float 0-1.
-    """
+    """Send chat completion through litellm. Returns OpenAI-style dict."""
     cfg = config or _get_config()
-    if not cfg:
+    if not llm_credentials_configured(cfg):
         raise Exception("Configure LLM API key in Admin → Security")
-
-    use_litellm = getattr(cfg, "use_litellm", False)
-    if not use_litellm and not cfg.openai_api_key:
-        raise Exception("Configure LLM API key in Admin → Security")
-
-    api_key = effective_llm_api_key(cfg) or ""
 
     try:
-        temp_float = float(temperature) if temperature is not None else 0.7
+        temp_float: Optional[float] = float(temperature) if temperature is not None else 0.7
     except (ValueError, TypeError):
         temp_float = 0.7
-    # Convert 0-10 scale to 0-1 (openai_client behavior)
-    if temp_float > 1.0:
+    # UI uses 0-10 scale; LiteLLM expects 0-1 (or 0-2 depending on provider).
+    if temp_float is not None and temp_float > 1.0:
         temp_float = temp_float / 10.0
 
-    litellm_base_url = getattr(cfg, "litellm_base_url", None) or "http://localhost:4000"
+    kwargs = _build_litellm_kwargs(
+        cfg=cfg,
+        model=model,
+        temperature=temp_float,
+        messages=messages,
+        tools=tools,
+        litellm_guardrail_name=litellm_guardrail_name,
+        litellm_metadata=litellm_metadata,
+    )
 
+    pid = provider_id(cfg)
     try:
-        if use_litellm:
-            return _call_litellm_chat(
-                messages=messages,
-                model=model,
-                temperature=temp_float,
-                api_key=api_key,
-                base_url=litellm_base_url,
-                tools=tools,
-                litellm_guardrail_name=litellm_guardrail_name,
-                litellm_metadata=litellm_metadata,
-            )
-        else:
-            return _call_openai_chat(
-                messages=messages,
-                model=model,
-                temperature=temp_float,
-                api_key=api_key,
-                tools=tools,
-            )
-    except openai.APIConnectionError as e:
-        if use_litellm:
-            raise Exception(
-                f"LiteLLM proxy unreachable: {e}. Is LiteLLM running on {litellm_base_url}?"
-            ) from e
+        response = litellm_completion(**kwargs)
+    except APIConnectionError as e:
+        if pid == "litellm_proxy":
+            base = provider_base_url(cfg)
+            raise Exception(f"LiteLLM proxy unreachable: {e}. Is the proxy running on {base}?") from e
+        if pid == "ollama":
+            base = provider_base_url(cfg)
+            raise Exception(f"Ollama unreachable: {e}. Is Ollama running on {base}?") from e
         raise
-    except openai.APIStatusError as e:
-        if use_litellm and getattr(e, "status_code", None) == 400:
+    except BadRequestError as e:
+        if pid == "litellm_proxy":
             lakera_status = _extract_litellm_guardrail_status(e)
             if lakera_status:
-                raise LiteLLMGuardrailError("LiteLLM guardrail blocked this response.", lakera_status) from e
+                raise LiteLLMGuardrailError(
+                    "LiteLLM guardrail blocked this response.", lakera_status
+                ) from e
         raise Exception(f"LLM API error: {e}") from e
+
+    # litellm.completion returns a ModelResponse; .model_dump() yields the OpenAI-style dict
+    # the rest of the codebase expects.
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    return dict(response)  # already a dict (unlikely)
 
 
 def get_embeddings(texts: List[str], config: Optional[AppConfig] = None) -> List[List[float]]:
-    """Get embeddings for text chunks. Routes to OpenAI or LiteLLM based on config."""
+    """Get embeddings for chunks. Only OpenAI and LiteLLM-proxy paths support embeddings today;
+    other providers fall back to OpenAI's embedding endpoint if a key is configured, otherwise raise."""
     cfg = config or _get_config()
     if not cfg:
         raise Exception("Configure LLM API key in Admin → Security")
 
-    use_litellm = getattr(cfg, "use_litellm", False)
-    if not use_litellm and not cfg.openai_api_key:
-        raise Exception("Configure LLM API key in Admin → Security")
-
-    api_key = effective_llm_api_key(cfg) or ""
-
-    litellm_base_url = getattr(cfg, "litellm_base_url", None) or "http://localhost:4000"
+    pid = provider_id(cfg)
+    # Embeddings: use the active provider when it sensibly supports them (openai/litellm_proxy),
+    # else fall back to OpenAI direct using whatever openai_api_key the user has saved.
+    if pid in {"openai", "litellm_proxy"} and llm_credentials_configured(cfg):
+        api_key = provider_api_key(cfg) or ""
+        api_base = provider_base_url(cfg)
+        kwargs: Dict[str, Any] = {
+            "model": "text-embedding-ada-002",
+            "input": texts,
+            "api_key": api_key,
+        }
+        if pid == "litellm_proxy" and api_base:
+            kwargs["api_base"] = (
+                api_base if api_base.rstrip("/").endswith("/v1") else f"{api_base.rstrip('/')}/v1"
+            )
+            kwargs["custom_llm_provider"] = "openai"
+    else:
+        fallback_key = cfg.openai_api_key
+        if not fallback_key:
+            raise Exception(
+                "Embeddings require an OpenAI API key. Configure it in Admin → Security."
+            )
+        kwargs = {
+            "model": "text-embedding-ada-002",
+            "input": texts,
+            "api_key": fallback_key,
+        }
 
     try:
-        if use_litellm:
-            return _get_embeddings_litellm(
-                texts=texts,
-                api_key=api_key,
-                base_url=litellm_base_url,
-            )
+        response = litellm_embedding(**kwargs)
+    except APIConnectionError as e:
+        raise Exception(f"Embedding API unreachable: {e}") from e
+    except Exception as e:
+        raise Exception(f"Embedding API error: {e}") from e
+
+    data = response.get("data") if isinstance(response, dict) else response.data
+    out: List[List[float]] = []
+    for entry in data or []:
+        if isinstance(entry, dict):
+            emb = entry.get("embedding")
         else:
-            return _get_embeddings_openai(texts=texts, api_key=api_key)
-    except openai.APIConnectionError as e:
-        if use_litellm:
-            raise Exception(
-                f"LiteLLM proxy unreachable: {e}. Is LiteLLM running on {litellm_base_url}?"
-            ) from e
-        raise
-    except openai.APIStatusError as e:
-        raise Exception(f"LLM API error: {e}") from e
+            emb = getattr(entry, "embedding", None)
+        if emb is not None:
+            out.append(list(emb))
+    return out
 
 
-def _get_models_litellm(api_key: str, base_url: str) -> Optional[List[str]]:
-    """
-    Fetch key-specific models from LiteLLM proxy.
-    Returns list of model ids on success, None on failure (malformed response, timeout, 401, etc).
-    """
+def _get_models_litellm_proxy(api_key: Optional[str], base_url: str) -> Optional[List[str]]:
+    """Fetch key-specific models from a self-hosted LiteLLM proxy."""
     url = f"{base_url.rstrip('/')}/v1/models"
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     try:
         with httpx.Client(timeout=LITELLM_MODELS_TIMEOUT) as client:
             resp = client.get(url, headers=headers)
@@ -330,20 +311,42 @@ def _get_models_litellm(api_key: str, base_url: str) -> Optional[List[str]]:
     return result if result else None
 
 
+def _get_models_ollama(base_url: str) -> Optional[List[str]]:
+    """Fetch installed models from a local Ollama server."""
+    try:
+        with httpx.Client(timeout=LITELLM_MODELS_TIMEOUT) as client:
+            resp = client.get(f"{base_url.rstrip('/')}/api/tags")
+            resp.raise_for_status()
+            data = resp.json()
+    except (httpx.TimeoutException, httpx.ConnectError, httpx.HTTPStatusError, ValueError):
+        return None
+    models = data.get("models")
+    if not isinstance(models, list):
+        return None
+    names = []
+    for m in models:
+        if isinstance(m, dict) and m.get("name"):
+            names.append(str(m["name"]))
+    return names or None
+
+
 def get_models(config: Optional[AppConfig] = None) -> List[str]:
-    """
-    Get available models. When using LiteLLM, returns key-specific models from proxy.
-    Falls back to static list when not using LiteLLM, or when LiteLLM fetch fails/returns empty.
-    """
+    """List models for the active provider — dynamic when available, else static."""
     cfg = config or _get_config()
-    if not cfg:
-        return STATIC_MODELS
-    use_litellm = getattr(cfg, "use_litellm", False)
-    api_key = effective_llm_api_key(cfg)
-    if not use_litellm or not api_key:
-        return STATIC_MODELS
-    litellm_base_url = getattr(cfg, "litellm_base_url", None) or "http://localhost:4000"
-    models = _get_models_litellm(api_key=api_key, base_url=litellm_base_url)
-    if models:
-        return models
-    return STATIC_MODELS
+    pid = provider_id(cfg)
+    if pid == "litellm_proxy":
+        base = provider_base_url(cfg) or "http://localhost:4000"
+        api_key = provider_api_key(cfg)
+        dyn = _get_models_litellm_proxy(api_key, base)
+        if dyn:
+            return dyn
+    if pid == "ollama":
+        base = provider_base_url(cfg) or "http://localhost:11434"
+        dyn = _get_models_ollama(base)
+        if dyn:
+            return dyn
+    return provider_static_models(pid) or STATIC_MODELS
+
+
+# Silence noisy litellm logging by default (callers can override if they want)
+litellm.suppress_debug_info = True

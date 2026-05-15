@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Download, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react';
-import { AppConfig, AppConfigUpdate } from '../types';
+import { AppConfig, AppConfigUpdate, ProviderInfo } from '../types';
 import { apiService } from '../services/api';
 import UploadDropzone from '../components/UploadDropzone';
 import ToolManager from '../components/ToolManager';
@@ -19,9 +19,9 @@ const AdminConsole: React.FC = () => {
   const [ragScanningResult, setRagScanningResult] = useState<any>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [showOpenAIKey, setShowOpenAIKey] = useState(false);
-  const [showLitellmVirtualKey, setShowLitellmVirtualKey] = useState(false);
+  const [showProviderKey, setShowProviderKey] = useState(false);
   const [showLakeraKey, setShowLakeraKey] = useState(false);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [showMCPInstructions, setShowMCPInstructions] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [ragScanningNotificationCount, setRagScanningNotificationCount] = useState<number>(0);
@@ -47,7 +47,17 @@ const AdminConsole: React.FC = () => {
     loadConfig();
     loadModels();
     loadRagScanningResult();
+    loadProviders();
   }, []);
+
+  const loadProviders = async () => {
+    try {
+      const { providers } = await apiService.getProviders();
+      setProviders(providers);
+    } catch (error) {
+      console.error('Failed to load providers:', error);
+    }
+  };
  
   useEffect(() => {
     if (config) {
@@ -308,6 +318,13 @@ const AdminConsole: React.FC = () => {
         lakera_project_id: updates.lakera_project_id,
         use_litellm: updates.use_litellm ?? config.use_litellm,
         litellm_base_url: updates.litellm_base_url ?? config.litellm_base_url,
+        llm_provider: updates.llm_provider ?? config.llm_provider,
+        anthropic_api_key: updates.anthropic_api_key ?? config.anthropic_api_key,
+        google_api_key: updates.google_api_key ?? config.google_api_key,
+        mistral_api_key: updates.mistral_api_key ?? config.mistral_api_key,
+        groq_api_key: updates.groq_api_key ?? config.groq_api_key,
+        together_api_key: updates.together_api_key ?? config.together_api_key,
+        ollama_base_url: updates.ollama_base_url ?? config.ollama_base_url,
       };
 
       await apiService.updateConfig(updatedConfig);
@@ -1114,101 +1131,95 @@ const AdminConsole: React.FC = () => {
                   )}
                 </div>
                 
-                <div className="flex items-center space-x-3 mb-4">
-                  <button
-                    type="button"
-                    onClick={() => handleConfigUpdate({ use_litellm: !(config.use_litellm ?? false) })}
-                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                      config.use_litellm ? 'bg-primary-600' : 'bg-gray-200'
-                    }`}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                        (config.use_litellm ?? false) ? 'translate-x-6' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                  <div>
-                    <label className="text-sm font-medium text-gray-700">
-                      Use LiteLLM proxy
-                    </label>
-                    <p className="text-xs text-gray-500">
-                      Route LLM calls through LiteLLM instead of direct OpenAI
-                    </p>
-                  </div>
-                </div>
-                {(config.use_litellm ?? false) && (
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      LiteLLM base URL
-                    </label>
-                    <input
-                      type="text"
-                      value={config.litellm_base_url || 'http://localhost:4000'}
-                      onChange={(e) => handleConfigUpdate({ litellm_base_url: e.target.value })}
-                      placeholder="http://localhost:4000"
-                      className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                  </div>
-                )}
-                {!(config.use_litellm ?? false) && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      OpenAI API key
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showOpenAIKey ? "text" : "password"}
-                        value={config.openai_api_key || ""}
-                        onChange={(e) => handleConfigUpdate({ openai_api_key: e.target.value })}
-                        placeholder="sk-..."
-                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowOpenAIKey(!showOpenAIKey)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                      >
-                        {showOpenAIKey ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {(config.use_litellm ?? false) && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      LiteLLM API key (master or virtual)
-                    </label>
-                    <p className="text-xs text-gray-500 mb-2">
-                      Optional for some proxies; used as the Bearer token when set.
-                    </p>
-                    <div className="relative">
-                      <input
-                        type={showLitellmVirtualKey ? "text" : "password"}
-                        value={config.litellm_virtual_key || ""}
-                        onChange={(e) => handleConfigUpdate({ litellm_virtual_key: e.target.value })}
-                        placeholder="sk-... (master or virtual) or leave empty"
-                        className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowLitellmVirtualKey(!showLitellmVirtualKey)}
-                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                      >
-                        {showLitellmVirtualKey ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                )}
-                {(config.use_litellm ?? false) && config.lakera_enabled && (
+                {(() => {
+                  const activeProviderId = config.llm_provider || (config.use_litellm ? 'litellm_proxy' : 'openai');
+                  const activeProvider = providers.find((p) => p.id === activeProviderId);
+                  const keyField = activeProvider?.key_field as keyof AppConfig | null | undefined;
+                  const baseField = activeProvider?.base_url_field as keyof AppConfig | null | undefined;
+                  const keyValue = keyField ? ((config as any)[keyField] as string | undefined) : undefined;
+                  const baseValue = baseField ? ((config as any)[baseField] as string | undefined) : undefined;
+                  return (
+                    <>
+                      <div className="mb-4">
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          LLM Provider
+                        </label>
+                        <select
+                          value={activeProviderId}
+                          onChange={(e) => handleConfigUpdate({ llm_provider: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                          {providers.length === 0 ? (
+                            <option value={activeProviderId}>{activeProviderId}</option>
+                          ) : (
+                            providers.map((p) => (
+                              <option key={p.id} value={p.id}>{p.display_name}</option>
+                            ))
+                          )}
+                        </select>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Each provider stores its own key, so switching back and forth doesn&apos;t require re-entering credentials.
+                        </p>
+                      </div>
+
+                      {baseField && (
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            {activeProviderId === 'ollama' ? 'Ollama base URL' : 'LiteLLM base URL'}
+                          </label>
+                          <input
+                            type="text"
+                            value={baseValue || activeProvider?.default_base_url || ''}
+                            onChange={(e) => handleConfigUpdate({ [baseField]: e.target.value } as any)}
+                            placeholder={activeProvider?.default_base_url || ''}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                        </div>
+                      )}
+
+                      {keyField && (
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            {activeProvider?.display_name} API key
+                            {!activeProvider?.needs_key && (
+                              <span className="ml-2 text-xs text-gray-500">(optional)</span>
+                            )}
+                          </label>
+                          <div className="relative">
+                            <input
+                              type={showProviderKey ? 'text' : 'password'}
+                              value={keyValue || ''}
+                              onChange={(e) => handleConfigUpdate({ [keyField]: e.target.value } as any)}
+                              placeholder={
+                                activeProviderId === 'openai' ? 'sk-...' :
+                                activeProviderId === 'anthropic' ? 'sk-ant-...' :
+                                activeProviderId === 'google' ? 'AIza...' :
+                                activeProviderId === 'litellm_proxy' ? 'sk-... (master or virtual) or leave empty' :
+                                'API key'
+                              }
+                              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => setShowProviderKey(!showProviderKey)}
+                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                            >
+                              {showProviderKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {!keyField && !baseField && (
+                        <p className="text-xs text-gray-500 mb-4">
+                          This provider doesn&apos;t require any extra credentials in this app.
+                        </p>
+                      )}
+                    </>
+                  );
+                })()}
+
+                {config.llm_provider === 'litellm_proxy' && config.lakera_enabled && (
                   <div className="space-y-3">
                     <p className="text-xs text-gray-600">
                       In LiteLLM mode, the app selects a guardrail name based on Lakera blocking mode.

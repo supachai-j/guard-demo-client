@@ -22,6 +22,14 @@ export interface AppConfig {
   openai_api_key?: string;
   litellm_virtual_key?: string;
   lakera_api_key?: string;
+  // Multi-provider
+  llm_provider?: string;
+  anthropic_api_key?: string;
+  google_api_key?: string;
+  mistral_api_key?: string;
+  groq_api_key?: string;
+  together_api_key?: string;
+  ollama_base_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -48,6 +56,25 @@ export interface AppConfigUpdate {
   litellm_virtual_key?: string;
   lakera_api_key?: string;
   lakera_project_id?: string;
+  // Multi-provider
+  llm_provider?: string;
+  anthropic_api_key?: string;
+  google_api_key?: string;
+  mistral_api_key?: string;
+  groq_api_key?: string;
+  together_api_key?: string;
+  ollama_base_url?: string;
+}
+
+// Multi-provider catalog (GET /api/providers)
+export interface ProviderInfo {
+  id: string;
+  display_name: string;
+  key_field: string | null;
+  base_url_field: string | null;
+  default_base_url?: string | null;
+  needs_key: boolean;
+  models: string[];
 }
 
 // Chat types
@@ -170,6 +197,25 @@ export interface DemoPromptSuggestion {
 export interface DemoPromptSearchResponse {
   prompts: DemoPrompt[];
   suggestions: DemoPromptSuggestion[];
+}
+
+// Scenario types (one-click demo company switcher)
+export interface ScenarioPreview {
+  id: string;
+  industry: string;
+  business_name: string;
+  tagline: string;
+  hero_text: string;
+  theme: string;
+  logo_url: string;
+  hero_image_url: string;
+}
+
+export interface ApplyScenarioResponse {
+  message: string;
+  scenario_id: string;
+  business_name: string;
+  prompts_loaded: number;
 }
 
 // Detector labels mapping
