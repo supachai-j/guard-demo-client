@@ -359,12 +359,34 @@ class ApiService {
   }
 
   // OWASP / playbooks
-  async listPlaybooks(): Promise<{ playbooks: { id: string; name: string; docs_url?: string; count: number }[] }> {
+  async listPlaybooks(): Promise<{ playbooks: { id: string; name: string; docs_url?: string; count: number; is_builtin?: boolean }[] }> {
     return this.request('/playbooks');
   }
 
+  async getPlaybook(id: string): Promise<any> {
+    return this.request(`/playbooks/${encodeURIComponent(id)}`);
+  }
+
   async runPlaybook(id: string): Promise<any> {
-    return this.request(`/playbooks/${id}/run`, { method: 'POST' });
+    return this.request(`/playbooks/${encodeURIComponent(id)}/run`, { method: 'POST' });
+  }
+
+  async createPlaybook(payload: { name: string; description?: string; prompts: any[] }): Promise<any> {
+    return this.request('/playbooks', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async updatePlaybook(id: string, payload: { name?: string; description?: string; prompts?: any[] }): Promise<any> {
+    return this.request(`/playbooks/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deletePlaybook(id: string): Promise<{ deleted: number }> {
+    return this.request(`/playbooks/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
   // Recordings

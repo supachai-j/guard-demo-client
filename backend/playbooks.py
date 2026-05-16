@@ -306,11 +306,25 @@ PLAYBOOKS: Dict[str, Dict] = {
 
 
 def get_playbook(playbook_id: str):
+    """Lookup a built-in playbook by id. Custom DB-backed playbooks are
+    resolved in `backend/main.py` against the `playbooks` table."""
     return PLAYBOOKS.get(playbook_id)
 
 
+def is_builtin(playbook_id: str) -> bool:
+    return playbook_id in PLAYBOOKS
+
+
 def list_playbooks() -> List[Dict]:
+    """Catalog of built-in playbooks. Custom DB rows are merged in by the
+    route handler so list-time merging stays a single concern."""
     return [
-        {"id": p["id"], "name": p["name"], "docs_url": p.get("docs_url"), "count": len(p.get("prompts", []))}
+        {
+            "id": p["id"],
+            "name": p["name"],
+            "docs_url": p.get("docs_url"),
+            "count": len(p.get("prompts", [])),
+            "is_builtin": True,
+        }
         for p in PLAYBOOKS.values()
     ]

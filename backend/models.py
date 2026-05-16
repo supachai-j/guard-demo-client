@@ -177,6 +177,24 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
+class Playbook(Base):
+    """Customer-specific POC playbook stored in DB.
+
+    Built-in playbooks (OWASP, default POC) live in `backend/playbooks.py`
+    and are merged with these rows when the catalog is requested.
+    `slug` is the public id used in API paths (e.g. /api/playbooks/{slug}).
+    """
+    __tablename__ = "playbooks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    slug = Column(String, unique=True, index=True)
+    name = Column(String)
+    description = Column(Text, nullable=True)
+    prompts = Column(JSON, default=[])
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class SessionRecording(Base):
     """Demo recorder — captures a sequence of user prompts for later replay."""
     __tablename__ = "session_recordings"

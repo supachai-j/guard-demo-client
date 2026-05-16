@@ -7,7 +7,8 @@
  */
 import React, { useEffect, useState } from 'react';
 import { apiService } from '../services/api';
-import { Download, Trash2, Play, Shield, AlertTriangle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { Download, Trash2, Play, Shield, AlertTriangle, CheckCircle2, RefreshCw, Settings } from 'lucide-react';
+import PlaybookManager from './PlaybookManager';
 
 type AuditEntry = {
   id: number;
@@ -304,8 +305,9 @@ const ComparePanel: React.FC = () => {
 };
 
 const PlaybookPanel: React.FC = () => {
-  const [playbooks, setPlaybooks] = useState<{ id: string; name: string; count: number; docs_url?: string }[]>([]);
+  const [playbooks, setPlaybooks] = useState<{ id: string; name: string; count: number; docs_url?: string; is_builtin?: boolean }[]>([]);
   const [activeId, setActiveId] = useState<string>('owasp_llm_top10_2025');
+  const [managerOpen, setManagerOpen] = useState(false);
   const [results, setResults] = useState<PlaybookResult[]>([]);
   const [summary, setSummary] = useState<{
     passed: number; detected: number; total: number;
@@ -313,8 +315,19 @@ const PlaybookPanel: React.FC = () => {
   } | null>(null);
   const [loading, setLoading] = useState(false);
 
+  const reloadCatalog = () => {
+    apiService.listPlaybooks().then(d => {
+      setPlaybooks(d.playbooks);
+      // If the currently-selected playbook was deleted, fall back to the first.
+      if (d.playbooks.length > 0 && !d.playbooks.some(p => p.id === activeId)) {
+        setActiveId(d.playbooks[0].id);
+      }
+    }).catch(() => {});
+  };
+
   useEffect(() => {
-    apiService.listPlaybooks().then(d => setPlaybooks(d.playbooks)).catch(() => {});
+    reloadCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const run = async () => {
@@ -374,16 +387,27 @@ const PlaybookPanel: React.FC = () => {
     <div className="space-y-3">
       <div className="bg-white dark:bg-slate-800 rounded border border-gray-200 dark:border-slate-700 p-3">
         <label className="block text-sm font-medium mb-1 dark:text-slate-200">Playbook</label>
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
           <select
             value={activeId}
             onChange={e => setActiveId(e.target.value)}
             className="px-3 py-1.5 border border-gray-300 dark:border-slate-600 rounded bg-white dark:bg-slate-900 dark:text-slate-100"
           >
-            {playbooks.map(p => <option key={p.id} value={p.id}>{p.name} ({p.count})</option>)}
+            {playbooks.map(p => (
+              <option key={p.id} value={p.id}>
+                {p.name} ({p.count}){p.is_builtin === false ? ' · custom' : ''}
+              </option>
+            ))}
           </select>
           <button onClick={run} disabled={loading} className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
             <Shield className="w-4 h-4" /> {loading ? 'Scanning…' : 'Run against active guardrail'}
+          </button>
+          <button
+            onClick={() => setManagerOpen(true)}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-600"
+            title="Add / edit / delete custom POC playbooks"
+          >
+            <Settings className="w-4 h-4" /> Manage
           </button>
         </div>
         {summary && (
@@ -426,6 +450,11 @@ const PlaybookPanel: React.FC = () => {
           </tbody>
         </table>
       </div>
+      <PlaybookManager
+        open={managerOpen}
+        onClose={() => setManagerOpen(false)}
+        onChanged={reloadCatalog}
+      />
     </div>
   );
 };

@@ -6,7 +6,7 @@ import shutil
 import sys
 import zipfile
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -26,6 +26,7 @@ from .models import (
     DemoPrompt,
     MCPToolCapabilities,
     Message,
+    Playbook,
     RagSource,
     SessionRecording,
     Tool,
@@ -41,6 +42,8 @@ from .schemas import (
     DemoPromptCreate,
     DemoPromptResponse,
     DemoPromptUpdate,
+    PlaybookCreate,
+    PlaybookUpdate,
     RagGenerateRequest,
     RagGenerateResponse,
     RagSearchResponse,
@@ -1753,18 +1756,131 @@ async def replay_recording(recording_id: int, db: Session = Depends(get_db)):
 from . import playbooks as _playbooks
 
 
+def _slugify(name: str) -> str:
+    """Convert a human name into a URL-safe playbook slug."""
+    import re
+    slug = re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")
+    return slug or "playbook"
+
+
+def _unique_slug(db: Session, name: str) -> str:
+    """Generate a slug unique across both built-ins and the DB."""
+    base = _slugify(name)
+    candidate = base
+    suffix = 2
+    while _playbooks.is_builtin(candidate) or db.query(Playbook).filter(Playbook.slug == candidate).first():
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
+def _custom_playbook_to_dict(pb: Playbook) -> Dict:
+    return {
+        "id": pb.slug,
+        "name": pb.name,
+        "description": pb.description,
+        "docs_url": None,
+        "prompts": pb.prompts or [],
+        "is_builtin": False,
+        "created_at": pb.created_at.isoformat() if pb.created_at else None,
+        "updated_at": pb.updated_at.isoformat() if pb.updated_at else None,
+    }
+
+
+def _resolve_playbook(db: Session, playbook_id: str) -> Optional[Dict]:
+    """Find a playbook by id — built-in first, then DB by slug."""
+    pb = _playbooks.get_playbook(playbook_id)
+    if pb:
+        return {**pb, "is_builtin": True}
+    row = db.query(Playbook).filter(Playbook.slug == playbook_id).first()
+    if row:
+        return _custom_playbook_to_dict(row)
+    return None
+
+
 @app.get("/api/playbooks")
-async def list_playbooks():
-    """Catalog of attack playbooks the UI offers in the Threat Lab tab."""
-    return {"playbooks": _playbooks.list_playbooks()}
+async def list_playbooks(db: Session = Depends(get_db)):
+    """Catalog of playbooks — built-ins from code plus customer-specific
+    playbooks stored in the `playbooks` table. The is_builtin flag tells
+    the UI whether to expose edit/delete controls."""
+    builtin = _playbooks.list_playbooks()
+    custom_rows = db.query(Playbook).order_by(Playbook.updated_at.desc()).all()
+    custom = [
+        {
+            "id": pb.slug,
+            "name": pb.name,
+            "docs_url": None,
+            "count": len(pb.prompts or []),
+            "is_builtin": False,
+        }
+        for pb in custom_rows
+    ]
+    return {"playbooks": builtin + custom}
 
 
 @app.get("/api/playbooks/{playbook_id}")
-async def get_playbook(playbook_id: str):
-    pb = _playbooks.get_playbook(playbook_id)
+async def get_playbook(playbook_id: str, db: Session = Depends(get_db)):
+    pb = _resolve_playbook(db, playbook_id)
     if not pb:
         raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
     return pb
+
+
+@app.post("/api/playbooks", dependencies=[Depends(_auth.require_admin)])
+async def create_playbook(payload: PlaybookCreate, db: Session = Depends(get_db)):
+    """Create a custom (DB-backed) playbook. Slug derives from name and
+    is made unique against both built-ins and existing custom rows."""
+    if not (payload.name or "").strip():
+        raise HTTPException(status_code=400, detail="name is required")
+    slug = _unique_slug(db, payload.name)
+    row = Playbook(
+        slug=slug,
+        name=payload.name.strip(),
+        description=(payload.description or None),
+        prompts=[p.model_dump() for p in payload.prompts],
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _custom_playbook_to_dict(row)
+
+
+@app.put("/api/playbooks/{playbook_id}", dependencies=[Depends(_auth.require_admin)])
+async def update_playbook(playbook_id: str, payload: PlaybookUpdate, db: Session = Depends(get_db)):
+    """Update a custom playbook. Built-ins are read-only — they return 404
+    so the UI never offers an edit button."""
+    if _playbooks.is_builtin(playbook_id):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Playbook '{playbook_id}' is built-in and cannot be edited. Duplicate it as a custom playbook first.",
+        )
+    row = db.query(Playbook).filter(Playbook.slug == playbook_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+    if payload.name is not None:
+        row.name = payload.name.strip()
+    if payload.description is not None:
+        row.description = payload.description or None
+    if payload.prompts is not None:
+        row.prompts = [p.model_dump() for p in payload.prompts]
+    db.commit()
+    db.refresh(row)
+    return _custom_playbook_to_dict(row)
+
+
+@app.delete("/api/playbooks/{playbook_id}", dependencies=[Depends(_auth.require_admin)])
+async def delete_playbook(playbook_id: str, db: Session = Depends(get_db)):
+    if _playbooks.is_builtin(playbook_id):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Playbook '{playbook_id}' is built-in and cannot be deleted.",
+        )
+    row = db.query(Playbook).filter(Playbook.slug == playbook_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+    db.delete(row)
+    db.commit()
+    return {"deleted": 1}
 
 
 @app.post("/api/playbooks/{playbook_id}/run", dependencies=[Depends(_auth.require_admin)])
@@ -1779,7 +1895,7 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
 
     from .guardrail_provider import GUARDRAIL_PROVIDERS, active_provider_id
 
-    pb = _playbooks.get_playbook(playbook_id)
+    pb = _resolve_playbook(db, playbook_id)
     if not pb:
         raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
 

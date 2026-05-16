@@ -194,3 +194,26 @@ class DemoPromptSearchRequest(BaseModel):
     query: str
     category: Optional[str] = None
     limit: int = 10
+
+
+# Playbook schemas — custom POC playbooks managed via the admin UI.
+# Built-in playbooks live in backend/playbooks.py and are read-only.
+class PlaybookPromptIn(BaseModel):
+    """One prompt inside a playbook. `expected` drives the pass/fail scoring."""
+    id: str
+    category: str = "Custom"
+    prompt: str
+    expected: str = "blocked"  # "blocked" or "allowed"
+    description: Optional[str] = None
+
+
+class PlaybookCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    prompts: List[PlaybookPromptIn] = []
+
+
+class PlaybookUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    prompts: Optional[List[PlaybookPromptIn]] = None

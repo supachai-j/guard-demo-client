@@ -6,7 +6,7 @@ These integrity tests guard against the easy regressions:
   - shipping the POC playbook without enough golden-path coverage
 """
 
-from backend.playbooks import PLAYBOOKS, get_playbook, list_playbooks
+from backend.playbooks import PLAYBOOKS, get_playbook, is_builtin, list_playbooks
 
 
 # ---------- catalog --------------------------------------------------------
@@ -23,8 +23,23 @@ def test_list_playbooks_shape():
         assert entry["count"] >= 1
 
 
+def test_list_playbooks_marks_builtins():
+    """Custom DB rows are merged in the route handler — the function-level
+    catalog must always flag entries as built-in so the UI can hide
+    edit/delete on them."""
+    for entry in list_playbooks():
+        assert entry.get("is_builtin") is True
+
+
 def test_get_playbook_returns_none_for_unknown():
     assert get_playbook("does-not-exist") is None
+
+
+def test_is_builtin_helper():
+    assert is_builtin("owasp_llm_top10_2025") is True
+    assert is_builtin("poc_verification") is True
+    assert is_builtin("custom_acme_inc") is False
+    assert is_builtin("") is False
 
 
 # ---------- shared schema validation ---------------------------------------
