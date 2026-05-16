@@ -1,0 +1,40 @@
+# Pre-commit hooks — runs on `git commit` BEFORE the commit lands.
+# One-time developer setup:
+#
+#   pip install pre-commit
+#   pre-commit install
+#
+# Skip on a one-off if you must (not recommended — the hooks are quick):
+#
+#   git commit --no-verify
+#
+# CI re-runs these checks regardless of local skipping, so untracked
+# violations land back on the PR rather than silently merging.
+
+repos:
+  # Astral's ruff — same lint config as CI, but fast (Rust-based).
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        files: ^(backend|tests)/.*\.py$
+        args: [--fix]
+
+  # gitleaks — secret-scan the staged diff so credentials never enter history.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.4
+    hooks:
+      - id: gitleaks
+
+  # Cheap hygiene fixes. Keeps the diff clean without manual work.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=500]
+      - id: check-merge-conflict

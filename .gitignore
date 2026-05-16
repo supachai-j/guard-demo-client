@@ -140,3 +140,7 @@ config.json
 build/
 dist/
 
+# Oracle vault — local-only retrospectives + lessons (see ψ/README if you have one).
+# Not committed to product repos.
+ψ/
+

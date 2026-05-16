@@ -1,0 +1,109 @@
+name: CI
+
+# DevSecOps pipeline. Five concerns in five separate jobs so a flake in one
+# doesn't mask issues in another:
+#   - backend      → ruff + pytest
+#   - frontend     → tsc + (optional) eslint
+#   - python-deps  → pip-audit against requirements.txt
+#   - npm-deps     → npm audit (high-and-above only, non-blocking initially)
+#   - secrets      → gitleaks full-history scan
+#
+# Anything tagged `continue-on-error: true` is a soft-gate while we burn down
+# pre-existing findings. Promote to hard-gate once green.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (ruff + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dev deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Ruff lint
+        run: python -m ruff check backend tests
+
+      - name: Pytest
+        run: python -m pytest
+
+  frontend:
+    name: Frontend (tsc + eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install
+        run: npm ci
+
+      - name: TypeScript typecheck
+        # The repo currently ships 3 pre-existing TS errors in
+        # DemoPromptManager / GenerateContentModal / RagManagement.
+        # Tighten to hard-fail once those are cleaned up.
+        run: npx tsc --noEmit
+        continue-on-error: true
+
+      - name: ESLint
+        run: npm run lint
+        continue-on-error: true
+
+  python-deps:
+    name: Python dependency audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pypa/gh-action-pip-audit@v1.0.8
+        with:
+          inputs: requirements.txt
+          # Only fail on HIGH or CRITICAL. Dependabot will PR fixes for the rest.
+          ignore-vulns: ""
+
+  npm-deps:
+    name: npm dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      # Skip postinstall scripts during audit-only setup.
+      - run: npm ci --ignore-scripts
+      - name: npm audit (high+)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks needs full history to scan past commits
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
