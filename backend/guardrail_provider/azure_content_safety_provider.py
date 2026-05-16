@@ -179,6 +179,15 @@ class AzureContentSafetyProvider(GuardrailProvider):
 
         analyze_resp, shield_resp = results
         breakdown: List[Dict[str, Any]] = []
+        # Track which upstream calls produced usable data. If neither did, we
+        # must NOT pretend the prompt is clean — the caller (compare panel,
+        # chat path) needs to know the check effectively didn't run.
+        analyze_ok = False
+        shield_ok = False
+        # Treat 404 on shieldPrompt as "endpoint not available" rather than failure;
+        # we still want to count the partial outage as informational.
+        shield_unavailable = False
+        partial_failure: List[str] = []
 
         # text:analyze categories
         if isinstance(analyze_resp, httpx.Response):
@@ -188,16 +197,20 @@ class AzureContentSafetyProvider(GuardrailProvider):
                     breakdown.extend(
                         _format_categories(data.get("categoriesAnalysis") or [], message_id)
                     )
+                    analyze_ok = True
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Azure text:analyze parse error: %s", e)
+                    partial_failure.append(f"text:analyze parse error: {e}")
             else:
                 logger.warning(
                     "Azure text:analyze HTTP %s: %s",
                     analyze_resp.status_code,
                     analyze_resp.text[:200],
                 )
+                partial_failure.append(f"text:analyze HTTP {analyze_resp.status_code}")
         elif isinstance(analyze_resp, Exception):
             logger.warning("Azure text:analyze failed: %s", analyze_resp)
+            partial_failure.append(f"text:analyze transport error: {analyze_resp}")
 
         # text:shieldPrompt — may not be available in older API versions; ignore on 404.
         if isinstance(shield_resp, httpx.Response):
@@ -205,30 +218,46 @@ class AzureContentSafetyProvider(GuardrailProvider):
                 try:
                     data = shield_resp.json()
                     breakdown.extend(_format_shield(data, message_id))
+                    shield_ok = True
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Azure shieldPrompt parse error: %s", e)
+                    partial_failure.append(f"shieldPrompt parse error: {e}")
             elif shield_resp.status_code == 404:
                 logger.info("Azure Prompt Shields not available in this region/api-version")
+                shield_unavailable = True  # not counted as a failure
             else:
                 logger.warning(
                     "Azure shieldPrompt HTTP %s: %s",
                     shield_resp.status_code,
                     shield_resp.text[:200],
                 )
+                partial_failure.append(f"shieldPrompt HTTP {shield_resp.status_code}")
         elif isinstance(shield_resp, Exception):
             logger.warning("Azure shieldPrompt failed: %s", shield_resp)
+            partial_failure.append(f"shieldPrompt transport error: {shield_resp}")
+
+        # No usable data at all? Return None so the caller can distinguish
+        # "guardrail outage" from "prompt is clean". Without this, Azure was
+        # silently fail-open: a DNS or 401 failure produced `flagged=False`
+        # and the chat path would let an attack through.
+        if not analyze_ok and not shield_ok and not shield_unavailable:
+            return None
 
         flagged = any(b.get("detected") for b in breakdown)
+
+        metadata: Dict[str, Any] = {
+            "source": "azure_content_safety",
+            "endpoint": endpoint,
+            "api_version": _API_VERSION,
+        }
+        if partial_failure:
+            metadata["partial_failure"] = partial_failure
 
         status: GuardrailStatus = {
             "flagged": flagged,
             "breakdown": breakdown,
             "payload": [],
-            "metadata": {
-                "source": "azure_content_safety",
-                "endpoint": endpoint,
-                "api_version": _API_VERSION,
-            },
+            "metadata": metadata,
         }
         legacy_lakera.set_last_result(status)
         return status

@@ -1794,6 +1794,18 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
             detail=f"Active guardrail provider '{pid}' is not configured. Set keys in Admin → Security.",
         )
 
+    def _verdict(flagged: bool, expected: str | None) -> bool:
+        """Did the guardrail behave as the playbook prompt declared?
+
+        expected="blocked" → must be flagged
+        expected="allowed" → must NOT be flagged
+        expected=None      → fall back to the legacy assumption (every prompt
+                             is an attack), so flagged means pass."""
+        if expected == "allowed":
+            return not flagged
+        # Treat both "blocked" and a missing expected as "should be flagged".
+        return flagged
+
     async def _scan(item):
         try:
             status = await provider.check_interaction(
@@ -1802,12 +1814,14 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
                 meta=None,
                 system_prompt=config.system_prompt,
             )
+            flagged = bool(status and status.get("flagged"))
             return {
                 "id": item["id"],
                 "category": item["category"],
                 "prompt": item["prompt"],
                 "expected": item.get("expected"),
-                "flagged": bool(status and status.get("flagged")),
+                "flagged": flagged,
+                "passed": _verdict(flagged, item.get("expected")),
                 "breakdown": (status or {}).get("breakdown") or [],
                 "status": status,
             }
@@ -1818,11 +1832,15 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
                 "prompt": item["prompt"],
                 "expected": item.get("expected"),
                 "flagged": False,
+                # Errors count as failures so the operator notices them in
+                # the dashboard instead of silently 100%-passing.
+                "passed": False,
                 "error": str(e),
             }
 
     results = await _aio.gather(*[_scan(p) for p in pb["prompts"]])
     detected = sum(1 for r in results if r.get("flagged"))
+    passed = sum(1 for r in results if r.get("passed"))
     total = len(results)
     return {
         "playbook_id": playbook_id,
@@ -1830,6 +1848,8 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
         "guardrail_provider": pid,
         "guardrail_display_name": provider.display_name,
         "detection_rate": round(100.0 * detected / total, 1) if total else 0.0,
+        "pass_rate": round(100.0 * passed / total, 1) if total else 0.0,
+        "passed": passed,
         "detected": detected,
         "total": total,
         "results": results,
@@ -2228,6 +2248,7 @@ async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)
                 "status": None,
                 "latency_ms": 0,
                 "error": None,
+                "warnings": [],
             }
         t0 = _t.monotonic()
         try:
@@ -2237,6 +2258,23 @@ async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)
                 meta={"session_id": request.session_id} if request.session_id else None,
                 system_prompt=config.system_prompt,
             )
+            warnings: List[str] = []
+            # Provider returned nothing despite being configured — almost
+            # always an internal failure (rate limit, auth, DNS) that the
+            # provider swallowed. Surface it as a warning so the operator
+            # doesn't mistake it for a clean pass.
+            if status is None:
+                warnings.append(
+                    "Provider returned no result; likely an internal error. "
+                    "Check backend logs."
+                )
+            else:
+                # Providers can flag partial-upstream-failure via metadata
+                # (Azure currently does this when text:analyze succeeds but
+                # shieldPrompt fails, or vice versa).
+                meta_warnings = (status.get("metadata") or {}).get("partial_failure") or []
+                if isinstance(meta_warnings, list):
+                    warnings.extend(str(w) for w in meta_warnings)
             return {
                 "provider": pid,
                 "display_name": provider.display_name,
@@ -2244,6 +2282,7 @@ async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)
                 "status": status,
                 "latency_ms": int((_t.monotonic() - t0) * 1000),
                 "error": None,
+                "warnings": warnings,
             }
         except Exception as e:
             return {
@@ -2253,6 +2292,7 @@ async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)
                 "status": None,
                 "latency_ms": int((_t.monotonic() - t0) * 1000),
                 "error": str(e),
+                "warnings": [],
             }
 
     tasks = [_run_one(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items()]

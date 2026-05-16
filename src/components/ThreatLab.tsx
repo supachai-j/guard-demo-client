@@ -29,6 +29,7 @@ type CompareResult = {
   status: any;
   latency_ms: number;
   error?: string | null;
+  warnings?: string[];
 };
 
 type PlaybookResult = {
@@ -36,6 +37,8 @@ type PlaybookResult = {
   category: string;
   prompt: string;
   flagged: boolean;
+  expected?: 'blocked' | 'allowed' | null;
+  passed?: boolean;
   breakdown?: any[];
   error?: string;
 };
@@ -59,7 +62,7 @@ const ThreatLab: React.FC = () => {
         <TabBtn current={tab} id="cost" onClick={setTab}>Cost</TabBtn>
         <TabBtn current={tab} id="compare" onClick={setTab}>Guardrail compare</TabBtn>
         <TabBtn current={tab} id="compare-llms" onClick={setTab}>Compare LLMs</TabBtn>
-        <TabBtn current={tab} id="playbook" onClick={setTab}>OWASP playbook</TabBtn>
+        <TabBtn current={tab} id="playbook" onClick={setTab}>Playbooks</TabBtn>
         <TabBtn current={tab} id="batch" onClick={setTab}>Batch eval</TabBtn>
         <TabBtn current={tab} id="health" onClick={setTab}>Health</TabBtn>
         <TabBtn current={tab} id="recordings" onClick={setTab}>Recordings</TabBtn>
@@ -240,24 +243,59 @@ const ComparePanel: React.FC = () => {
           </thead>
           <tbody>
             {results.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-gray-500">Click "Compare all providers" to fan the prompt out.</td></tr>}
-            {results.map(r => (
-              <tr key={r.provider} className="border-t border-gray-100 dark:border-slate-700">
-                <td className="p-2 dark:text-slate-200 font-medium">{r.display_name}</td>
-                <td className="p-2">{r.configured ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <span className="text-xs text-gray-400">not configured</span>}</td>
-                <td className="p-2">
-                  {r.status?.flagged ? <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-800">flagged</span>
-                    : r.configured ? <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">clean</span>
-                    : '—'}
-                </td>
-                <td className="p-2 text-xs">
-                  {(r.status?.breakdown || []).map((b: any, i: number) => (
-                    <span key={i} className="inline-block mr-1 mb-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">{b.detector_type}</span>
-                  ))}
-                  {r.error && <span className="text-red-600">{r.error}</span>}
-                </td>
-                <td className="p-2 text-right text-xs text-gray-500">{r.latency_ms} ms</td>
-              </tr>
-            ))}
+            {results.map(r => {
+              const allDetectors = (r.status?.breakdown || []) as Array<{ detector_type?: string; detected?: boolean }>;
+              const firedDetectors = allDetectors.filter(b => b.detected);
+              // Verdict precedence: explicit error > null status > flagged > clean > "—"
+              const hasError = !!r.error;
+              const noResult = r.configured && !hasError && r.status == null;
+              const warnings = r.warnings || [];
+              return (
+                <tr key={r.provider} className="border-t border-gray-100 dark:border-slate-700">
+                  <td className="p-2 dark:text-slate-200 font-medium">{r.display_name}</td>
+                  <td className="p-2">{r.configured ? <CheckCircle2 className="w-4 h-4 text-green-600" /> : <span className="text-xs text-gray-400">not configured</span>}</td>
+                  <td className="p-2">
+                    {hasError && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-800" title={r.error || undefined}>error</span>
+                    )}
+                    {!hasError && noResult && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-800" title="Provider returned no result (likely an internal error — check backend logs).">no result</span>
+                    )}
+                    {!hasError && r.status?.flagged && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-red-100 text-red-800">flagged</span>
+                    )}
+                    {!hasError && !noResult && r.status && !r.status.flagged && (
+                      <span className="px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">clean</span>
+                    )}
+                    {!r.configured && !hasError && '—'}
+                  </td>
+                  <td className="p-2 text-xs">
+                    {firedDetectors.map((b, i) => (
+                      <span key={i} className="inline-block mr-1 mb-1 px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200">{b.detector_type}</span>
+                    ))}
+                    {allDetectors.length > 0 && firedDetectors.length === 0 && (
+                      <span className="text-gray-400" title={`Provider checked ${allDetectors.length} detector${allDetectors.length === 1 ? '' : 's'}; none fired.`}>
+                        none fired ({allDetectors.length} checked)
+                      </span>
+                    )}
+                    {firedDetectors.length > 0 && allDetectors.length > firedDetectors.length && (
+                      <span className="block text-[10px] text-gray-400 mt-0.5">
+                        {firedDetectors.length} of {allDetectors.length} detectors fired
+                      </span>
+                    )}
+                    {r.error && <div className="text-red-600 mt-1">{r.error}</div>}
+                    {warnings.map((w, i) => (
+                      <div key={i} className="text-amber-700 dark:text-amber-300 text-[11px] mt-1" title={w}>
+                        ⚠ {w.length > 80 ? w.slice(0, 80) + '…' : w}
+                      </div>
+                    ))}
+                  </td>
+                  <td className="p-2 text-right text-xs text-gray-500">
+                    {r.configured ? `${r.latency_ms} ms` : '—'}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -269,7 +307,10 @@ const PlaybookPanel: React.FC = () => {
   const [playbooks, setPlaybooks] = useState<{ id: string; name: string; count: number; docs_url?: string }[]>([]);
   const [activeId, setActiveId] = useState<string>('owasp_llm_top10_2025');
   const [results, setResults] = useState<PlaybookResult[]>([]);
-  const [summary, setSummary] = useState<{ detected: number; total: number; rate: number; provider: string } | null>(null);
+  const [summary, setSummary] = useState<{
+    passed: number; detected: number; total: number;
+    passRate: number; detectionRate: number; provider: string;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -284,14 +325,49 @@ const PlaybookPanel: React.FC = () => {
       const data = await apiService.runPlaybook(activeId);
       setResults(data.results || []);
       setSummary({
+        passed: data.passed ?? data.detected,
         detected: data.detected,
         total: data.total,
-        rate: data.detection_rate,
+        passRate: data.pass_rate ?? data.detection_rate,
+        detectionRate: data.detection_rate,
         provider: data.guardrail_display_name,
       });
     } finally {
       setLoading(false);
     }
+  };
+
+  // Render verdict per row based on whether the result matched `expected`.
+  const renderVerdict = (r: PlaybookResult) => {
+    const passed = r.passed ?? r.flagged; // legacy fallback for old API shape
+    if (passed) {
+      const label = r.expected === 'allowed' ? 'Allowed (clean)' : 'Detected';
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-100 text-green-800">
+          <CheckCircle2 className="w-3 h-3" /> {label}
+        </span>
+      );
+    }
+    let label: string;
+    if (r.expected === 'allowed' && r.flagged) label = 'False positive';
+    else if (r.expected === 'blocked' && !r.flagged) label = 'Missed';
+    else label = 'Fail';
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-100 text-red-800">
+        <AlertTriangle className="w-3 h-3" /> {label}
+      </span>
+    );
+  };
+
+  const renderExpected = (e?: string | null) => {
+    if (!e) return <span className="text-gray-400">—</span>;
+    return (
+      <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+        e === 'blocked' ? 'bg-red-50 text-red-700 border border-red-200' : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+      }`}>
+        {e}
+      </span>
+    );
   };
 
   return (
@@ -311,10 +387,13 @@ const PlaybookPanel: React.FC = () => {
           </button>
         </div>
         {summary && (
-          <div className="mt-3 flex items-center gap-3 text-sm">
+          <div className="mt-3 flex items-center flex-wrap gap-3 text-sm">
             <span className="font-semibold dark:text-slate-100">{summary.provider}:</span>
-            <span className={`px-2 py-1 rounded ${summary.rate >= 80 ? 'bg-green-100 text-green-800' : summary.rate >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
-              Detected {summary.detected} / {summary.total} ({summary.rate}%)
+            <span className={`px-2 py-1 rounded ${summary.passRate >= 80 ? 'bg-green-100 text-green-800' : summary.passRate >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
+              Passed {summary.passed} / {summary.total} ({summary.passRate}%)
+            </span>
+            <span className="px-2 py-1 rounded bg-gray-100 text-gray-700 dark:bg-slate-700 dark:text-slate-200 text-xs">
+              Detected: {summary.detected} / {summary.total} ({summary.detectionRate}%)
             </span>
           </div>
         )}
@@ -323,23 +402,23 @@ const PlaybookPanel: React.FC = () => {
         <table className="w-full text-sm">
           <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300">
             <tr>
-              <th className="text-left p-2 w-16">ID</th>
+              <th className="text-left p-2 w-20">ID</th>
               <th className="text-left p-2">Category</th>
               <th className="text-left p-2">Prompt</th>
-              <th className="text-left p-2">Result</th>
+              <th className="text-left p-2 w-24">Expected</th>
+              <th className="text-left p-2 w-32">Result</th>
             </tr>
           </thead>
           <tbody>
-            {results.length === 0 && <tr><td colSpan={4} className="p-4 text-center text-gray-500">Pick a playbook and click Run.</td></tr>}
+            {results.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-gray-500">Pick a playbook and click Run.</td></tr>}
             {results.map(r => (
               <tr key={r.id} className="border-t border-gray-100 dark:border-slate-700">
                 <td className="p-2 font-mono text-xs dark:text-slate-200">{r.id}</td>
                 <td className="p-2 dark:text-slate-200">{r.category}</td>
                 <td className="p-2 max-w-md truncate dark:text-slate-300" title={r.prompt}>{r.prompt}</td>
+                <td className="p-2">{renderExpected(r.expected)}</td>
                 <td className="p-2">
-                  {r.flagged
-                    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-100 text-green-800"><CheckCircle2 className="w-3 h-3" /> Detected</span>
-                    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-100 text-red-800"><AlertTriangle className="w-3 h-3" /> Missed</span>}
+                  {renderVerdict(r)}
                   {r.error && <div className="text-xs text-red-600 mt-1">{r.error}</div>}
                 </td>
               </tr>
