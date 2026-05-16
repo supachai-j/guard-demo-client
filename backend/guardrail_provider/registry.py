@@ -7,6 +7,7 @@ Frontend Admin dropdown reads `list_providers_for_ui()`. Agent loop reads
 
 from typing import Any, Dict, List, Optional
 
+from .azure_content_safety_provider import AzureContentSafetyProvider
 from .base import GuardrailProvider
 from .bedrock_provider import BedrockGuardrailsProvider
 from .lakera_provider import LakeraProvider
@@ -17,6 +18,7 @@ GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
     LakeraProvider.id: LakeraProvider(),
     OpenAIModerationProvider.id: OpenAIModerationProvider(),
     BedrockGuardrailsProvider.id: BedrockGuardrailsProvider(),
+    AzureContentSafetyProvider.id: AzureContentSafetyProvider(),
 }
 
 
@@ -70,6 +72,14 @@ _PROVIDER_UI_FIELDS: Dict[str, Dict[str, Any]] = {
         ],
         "docs_url": "https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html",
         "summary": "Standalone ApplyGuardrail API. Requires a guardrail pre-created in the Bedrock console.",
+    },
+    "azure_content_safety": {
+        "fields": [
+            {"name": "azure_content_safety_endpoint", "label": "Resource Endpoint", "type": "text", "placeholder": "https://<resource>.cognitiveservices.azure.com"},
+            {"name": "azure_content_safety_key", "label": "Subscription Key", "type": "password", "placeholder": "your Ocp-Apim-Subscription-Key"},
+        ],
+        "docs_url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/",
+        "summary": "Calls text:analyze (Hate/SelfHarm/Sexual/Violence severity 0-6) + text:shieldPrompt (user-prompt + document injection) in parallel.",
     },
 }
 

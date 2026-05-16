@@ -52,6 +52,9 @@ class AppConfig(Base):
     bedrock_region = Column(String, nullable=True)
     bedrock_access_key_id = Column(String, nullable=True)
     bedrock_secret_access_key = Column(String, nullable=True)
+    # Azure AI Content Safety
+    azure_content_safety_endpoint = Column(String, nullable=True)
+    azure_content_safety_key = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

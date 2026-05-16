@@ -48,6 +48,8 @@ class AppConfigResponse(AppConfigBase):
     bedrock_region: Optional[str] = None
     bedrock_access_key_id: Optional[str] = None
     bedrock_secret_access_key: Optional[str] = None
+    azure_content_safety_endpoint: Optional[str] = None
+    azure_content_safety_key: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -75,6 +77,8 @@ class AppConfigUpdate(AppConfigBase):
     bedrock_region: Optional[str] = None
     bedrock_access_key_id: Optional[str] = None
     bedrock_secret_access_key: Optional[str] = None
+    azure_content_safety_endpoint: Optional[str] = None
+    azure_content_safety_key: Optional[str] = None
 
 
 # Chat schemas

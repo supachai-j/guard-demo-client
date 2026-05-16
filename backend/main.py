@@ -181,6 +181,8 @@ def _migrate_app_config_guardrail_provider():
         "bedrock_region": "VARCHAR",
         "bedrock_access_key_id": "VARCHAR",
         "bedrock_secret_access_key": "VARCHAR",
+        "azure_content_safety_endpoint": "VARCHAR",
+        "azure_content_safety_key": "VARCHAR",
     }
     with engine.connect() as conn:
         r = conn.execute(text("PRAGMA table_info(app_config)"))

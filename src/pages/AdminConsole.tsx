@@ -341,6 +341,8 @@ const AdminConsole: React.FC = () => {
         bedrock_region: updates.bedrock_region ?? config.bedrock_region,
         bedrock_access_key_id: updates.bedrock_access_key_id ?? config.bedrock_access_key_id,
         bedrock_secret_access_key: updates.bedrock_secret_access_key ?? config.bedrock_secret_access_key,
+        azure_content_safety_endpoint: updates.azure_content_safety_endpoint ?? config.azure_content_safety_endpoint,
+        azure_content_safety_key: updates.azure_content_safety_key ?? config.azure_content_safety_key,
       };
 
       await apiService.updateConfig(updatedConfig);
