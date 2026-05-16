@@ -8,10 +8,13 @@ import ToolManager from '../components/ToolManager';
 import GenerateContentModal from '../components/GenerateContentModal';
 import RagManagement, { RagManagementRef } from '../components/RagManagement';
 import DemoPromptManager from '../components/DemoPromptManager';
+import UIToggles from '../components/UIToggles';
+import { useUI } from '../i18n/UIContext';
 
 type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'prompts' | 'export';
 
 const AdminConsole: React.FC = () => {
+  const { t } = useUI();
   const [activeTab, setActiveTab] = useState<TabType>('setup');
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -400,15 +403,15 @@ const AdminConsole: React.FC = () => {
   };
 
   const tabs: { id: TabType; label: string; notificationCount?: number }[] = [
-    { id: 'setup', label: 'Setup' },
-    { id: 'branding', label: 'Branding' },
-    { id: 'llm', label: 'LLM' },
-    { id: 'rag', label: 'RAG' },
-    { id: 'rag-scanning', label: 'RAG Scanning Report', ...(ragScanningNotificationCount > 0 && { notificationCount: ragScanningNotificationCount }) },
-    { id: 'tools', label: 'Tools' },
-    { id: 'security', label: 'Security' },
-    { id: 'prompts', label: 'Demo Prompts' },
-    { id: 'export', label: 'Export/Import' },
+    { id: 'setup', label: t('tabSetup') },
+    { id: 'branding', label: t('tabBranding') },
+    { id: 'llm', label: t('tabLLM') },
+    { id: 'rag', label: t('tabRag') },
+    { id: 'rag-scanning', label: t('tabRagScanning'), ...(ragScanningNotificationCount > 0 && { notificationCount: ragScanningNotificationCount }) },
+    { id: 'tools', label: t('tabTools') },
+    { id: 'security', label: t('tabSecurity') },
+    { id: 'prompts', label: t('tabPrompts') },
+    { id: 'export', label: t('tabExport') },
   ];
 
   if (!config) {
@@ -420,22 +423,22 @@ const AdminConsole: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="admin-page min-h-screen bg-gray-50 dark:bg-slate-900">
       {/* Header */}
-      <header className="bg-white shadow-sm border-b border-gray-200">
+      <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-gray-200 dark:border-slate-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div className="flex items-center space-x-4">
               <Link
                 to="/"
-                className="flex items-center space-x-2 text-gray-600 hover:text-gray-900"
+                className="flex items-center space-x-2 text-gray-600 dark:text-slate-300 hover:text-gray-900 dark:hover:text-white"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Back to Demo</span>
+                <span>{t('backToDemo')}</span>
               </Link>
             </div>
-            <h1 className="text-xl font-bold text-gray-900">Admin Console</h1>
-            <div className="w-24"></div>
+            <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100">{t('adminConsole')}</h1>
+            <UIToggles />
           </div>
         </div>
       </header>
@@ -455,16 +458,16 @@ const AdminConsole: React.FC = () => {
 
       {/* Tabs */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-        <div className="border-b border-gray-200">
-          <nav className="-mb-px flex space-x-8">
+        <div className="border-b border-gray-200 dark:border-slate-700">
+          <nav className="-mb-px flex space-x-8 overflow-x-auto">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`py-2 px-1 border-b-2 font-medium text-sm relative ${
+                className={`py-2 px-1 border-b-2 font-medium text-sm relative whitespace-nowrap ${
                   activeTab === tab.id
-                    ? 'border-primary-500 text-primary-600'
-                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                    ? 'border-primary-500 text-primary-600 dark:text-primary-400'
+                    : 'border-transparent text-gray-500 dark:text-slate-400 hover:text-gray-700 dark:hover:text-slate-200 hover:border-gray-300 dark:hover:border-slate-600'
                 }`}
               >
                 <span className="flex items-center space-x-2">

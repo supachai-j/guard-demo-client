@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X, Shield, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiService } from '../services/api';
 import { LakeraResult, DETECTOR_LABELS } from '../types';
+import { useUI } from '../i18n/UIContext';
 
 interface LakeraOverlayProps {
   isOpen: boolean;
@@ -22,6 +23,7 @@ function messageIdToLabel(messageId: number): string {
 }
 
 const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
+  const { t } = useUI();
   const [lakeraResult, setLakeraResult] = useState<LakeraResult | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -58,19 +60,17 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
   };
 
   const getStatusText = () => {
-    if (!lakeraResult) return 'No result available';
-    
+    if (!lakeraResult) return t('noResult');
     const hasViolations = lakeraResult.flagged || lakeraResult.breakdown?.some(detector => detector.detected);
-    
-    return hasViolations ? 'Guardrails triggered' : 'All clear';
+    return hasViolations ? t('guardrailsTriggered') : t('allClear');
   };
 
   const getStatusColor = () => {
-    if (!lakeraResult) return 'bg-yellow-100 text-yellow-800';
-    
+    if (!lakeraResult) return 'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-800 dark:text-yellow-200';
     const hasViolations = lakeraResult.flagged || lakeraResult.breakdown?.some(detector => detector.detected);
-    
-    return hasViolations ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800';
+    return hasViolations
+      ? 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200'
+      : 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200';
   };
 
   const getViolationSummary = () => {
@@ -107,16 +107,17 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden">
+      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[80vh] overflow-hidden">
         {/* Header */}
         <div className="bg-primary-600 text-white p-4 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Shield className="w-5 h-5" />
-            <span className="font-semibold">Lakera Guard Results</span>
+            <span className="font-semibold">{t('guardrailResults')}</span>
           </div>
           <button
             onClick={onClose}
             className="text-white hover:text-gray-200"
+            aria-label={t('close')}
           >
             <X className="w-5 h-5" />
           </button>
@@ -127,7 +128,7 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
           {isLoading ? (
             <div className="text-center py-8">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
-              <p className="mt-2 text-gray-600">Loading guardrail results...</p>
+              <p className="mt-2 text-gray-600 dark:text-slate-400">{t('loadingResults')}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -139,7 +140,7 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
                 </div>
                 {lakeraResult && lakeraResult.metadata?.request_uuid && (
                   <p className="text-sm mt-1 opacity-75">
-                    Request ID: {lakeraResult.metadata.request_uuid}
+                    {t('requestId')}: {lakeraResult.metadata.request_uuid}
                   </p>
                 )}
               </div>
@@ -150,14 +151,14 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
                 if (!summary || Object.keys(summary.violations).length === 0) return null;
                 
                 return (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="font-semibold text-blue-800 mb-2 flex items-center">
+                  <div className="bg-blue-50 dark:bg-blue-500/15 border border-blue-200 dark:border-blue-500/30 rounded-lg p-4">
+                    <h3 className="font-semibold text-blue-800 dark:text-blue-200 mb-2 flex items-center">
                       <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
-                      Violation Summary
+                      {t('violationSummary')}
                     </h3>
-                    <div className="space-y-1 text-sm text-blue-700">
+                    <div className="space-y-1 text-sm text-blue-700 dark:text-blue-200">
                       {Object.entries(summary.violations).map(([type, counts]) => {
                         const label = DETECTOR_LABELS[type] || type;
                         const payloadCount = summary.payloadViolations[type] || 0;
@@ -198,23 +199,23 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
               {/* Guardrail Results */}
               {lakeraResult && lakeraResult.breakdown && (
                 <div className="space-y-3">
-                  <h3 className="font-semibold text-gray-800">Guardrail Details</h3>
+                  <h3 className="font-semibold text-gray-800 dark:text-slate-100">{t('guardrailDetails')}</h3>
                   {lakeraResult.breakdown.map((detector: any, index: number) => (
-                    <div key={index} className="border border-gray-200 rounded-lg p-3">
+                    <div key={index} className="border border-gray-200 dark:border-slate-600 rounded-lg p-3">
                       <div className="flex items-center justify-between">
                         <div>
-                          <p className="font-medium text-gray-800">
+                          <p className="font-medium text-gray-800 dark:text-slate-100">
                             {DETECTOR_LABELS[detector.detector_type || ''] || detector.detector_type || `Detector ${index + 1}`}
                           </p>
-                          <p className="text-sm text-gray-600">{detector.detector_id || 'No ID'}</p>
+                          <p className="text-sm text-gray-600 dark:text-slate-400">{detector.detector_id || 'No ID'}</p>
                         </div>
                         <span className={`px-2 py-1 rounded text-xs font-medium ${
-                          detector.detected 
-                            ? 'bg-red-100 text-red-800'
-                            : 'bg-green-100 text-green-800'
+                          detector.detected
+                            ? 'bg-red-100 dark:bg-red-500/20 text-red-800 dark:text-red-200'
+                            : 'bg-green-100 dark:bg-green-500/20 text-green-800 dark:text-green-200'
                         }`}>
-                          {messageIdToLabel(detector.message_id ?? -1)}: 
-                          {detector.detected ? 'Detected' : 'Clear'}
+                          {messageIdToLabel(detector.message_id ?? -1)}:{' '}
+                          {detector.detected ? t('detected') : t('clearStatus')}
                         </span>
                       </div>
                     </div>
@@ -223,18 +224,18 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
               )}
 
               {/* Raw JSON */}
-              <div className="border-t pt-4">
+              <div className="border-t dark:border-slate-700 pt-4">
                 <button
                   onClick={() => setIsExpanded(!isExpanded)}
-                  className="flex items-center space-x-2 text-gray-600 hover:text-gray-800"
+                  className="flex items-center space-x-2 text-gray-600 dark:text-slate-300 hover:text-gray-800 dark:hover:text-slate-100"
                 >
                   {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  <span className="font-medium">Raw JSON</span>
+                  <span className="font-medium">{t('rawJson')}</span>
                 </button>
-                
+
                 {isExpanded && lakeraResult && (
                   <div className="mt-2">
-                    <pre className="bg-gray-100 p-3 rounded text-xs overflow-x-auto">
+                    <pre className="bg-gray-100 dark:bg-slate-900 dark:text-slate-200 p-3 rounded text-xs overflow-x-auto">
                       {JSON.stringify(lakeraResult, null, 2)}
                     </pre>
                   </div>
@@ -243,9 +244,9 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
 
               {/* Error Display */}
               {lakeraResult && lakeraResult.flagged && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                  <h3 className="font-medium text-red-800 mb-2">Content Flagged</h3>
-                  <p className="text-sm text-red-600">This content has been flagged by Lakera Guard.</p>
+                <div className="bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg p-4">
+                  <h3 className="font-medium text-red-800 dark:text-red-200 mb-2">{t('contentFlagged')}</h3>
+                  <p className="text-sm text-red-600 dark:text-red-300">{t('contentFlaggedBody')}</p>
                 </div>
               )}
             </div>
@@ -253,19 +254,19 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
         </div>
 
         {/* Footer */}
-        <div className="bg-gray-50 px-6 py-3 border-t">
+        <div className="bg-gray-50 dark:bg-slate-900 px-6 py-3 border-t border-gray-200 dark:border-slate-700">
           <div className="flex justify-end space-x-2">
             <button
               onClick={fetchLakeraResult}
-              className="px-4 py-2 text-sm bg-gray-200 text-gray-700 rounded hover:bg-gray-300"
+              className="px-4 py-2 text-sm bg-gray-200 dark:bg-slate-700 text-gray-700 dark:text-slate-200 rounded hover:bg-gray-300 dark:hover:bg-slate-600"
             >
-              Refresh
+              {t('refresh')}
             </button>
             <button
               onClick={onClose}
               className="px-4 py-2 text-sm bg-primary-600 text-white rounded hover:bg-primary-700"
             >
-              Close
+              {t('close')}
             </button>
           </div>
         </div>

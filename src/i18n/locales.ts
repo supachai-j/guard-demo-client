@@ -59,10 +59,36 @@ export const EN = {
   close: 'Close',
 
   // Lakera overlay
-  guardrailResults: 'Guardrail Results',
+  guardrailResults: 'Lakera Guard Results',
   noLakeraResult: 'No guardrail result available yet — send a chat message first.',
   flagged: 'Flagged',
   clean: 'Clean',
+  loadingResults: 'Loading guardrail results…',
+  guardrailsTriggered: 'Guardrails triggered',
+  allClear: 'All clear',
+  noResult: 'No result available',
+  violationSummary: 'Violation Summary',
+  guardrailDetails: 'Guardrail Details',
+  rawJson: 'Raw JSON',
+  contentFlagged: 'Content Flagged',
+  contentFlaggedBody: 'This content has been flagged by Lakera Guard.',
+  requestId: 'Request ID',
+  refresh: 'Refresh',
+  detected: 'Detected',
+  clearStatus: 'Clear',
+
+  // Admin shell (minimal — operator tool, EN-first)
+  adminConsole: 'Admin Console',
+  backToDemo: 'Back to Demo',
+  tabSetup: 'Setup',
+  tabBranding: 'Branding',
+  tabLLM: 'LLM',
+  tabRag: 'RAG',
+  tabRagScanning: 'RAG Scanning Report',
+  tabTools: 'Tools',
+  tabSecurity: 'Security',
+  tabPrompts: 'Demo Prompts',
+  tabExport: 'Export/Import',
 } as const;
 
 export const TH: Dict = {
@@ -118,10 +144,36 @@ export const TH: Dict = {
   close: 'ปิด',
 
   // Lakera overlay
-  guardrailResults: 'ผลตรวจ Guardrail',
+  guardrailResults: 'ผลตรวจ Lakera Guard',
   noLakeraResult: 'ยังไม่มีผลตรวจ — ลองส่งข้อความใน chat ก่อน',
   flagged: 'พบความเสี่ยง',
   clean: 'ปลอดภัย',
+  loadingResults: 'กำลังโหลดผลตรวจ…',
+  guardrailsTriggered: 'Guardrails ทำงาน',
+  allClear: 'ปลอดภัยทั้งหมด',
+  noResult: 'ยังไม่มีผล',
+  violationSummary: 'สรุปการละเมิด',
+  guardrailDetails: 'รายละเอียด Guardrail',
+  rawJson: 'JSON ดิบ',
+  contentFlagged: 'เนื้อหาถูกตรวจพบ',
+  contentFlaggedBody: 'เนื้อหานี้ถูกตรวจพบโดย Lakera Guard',
+  requestId: 'Request ID',
+  refresh: 'รีเฟรช',
+  detected: 'ตรวจพบ',
+  clearStatus: 'ผ่าน',
+
+  // Admin shell — ส่วน operator-facing แปลแค่ tab/header
+  adminConsole: 'หน้าจัดการ',
+  backToDemo: 'กลับหน้า Demo',
+  tabSetup: 'ตั้งค่าเริ่มต้น',
+  tabBranding: 'แบรนด์',
+  tabLLM: 'LLM',
+  tabRag: 'RAG',
+  tabRagScanning: 'รายงานสแกน RAG',
+  tabTools: 'เครื่องมือ',
+  tabSecurity: 'ความปลอดภัย',
+  tabPrompts: 'Demo Prompts',
+  tabExport: 'นำเข้า/ส่งออก',
 };
 
 export const LOCALES = { en: EN, th: TH };

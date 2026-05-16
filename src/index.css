@@ -83,3 +83,70 @@ html.dark body {
   color: rgb(226 232 240);          /* slate-200 */
 }
 
+/*
+ * Scoped dark-mode overrides for the AdminConsole subtree.
+ * Avoids touching ~1400 lines of JSX by darkening the most common patterns
+ * (form inputs, gray panels, gray text, default borders) automatically.
+ * Components that already define their own dark: classes win because they
+ * have higher specificity / occur later in source order.
+ */
+html.dark .admin-page {
+  color: rgb(226 232 240); /* slate-200 default text */
+}
+
+html.dark .admin-page .bg-white { background-color: rgb(30 41 59); }      /* slate-800 */
+html.dark .admin-page .bg-gray-50 { background-color: rgb(15 23 42); }    /* slate-900 */
+html.dark .admin-page .bg-gray-100 { background-color: rgb(30 41 59); }   /* slate-800 */
+html.dark .admin-page .border-gray-200 { border-color: rgb(51 65 85); }   /* slate-700 */
+html.dark .admin-page .border-gray-300 { border-color: rgb(71 85 105); }  /* slate-600 */
+
+html.dark .admin-page .text-gray-900 { color: rgb(241 245 249); }         /* slate-100 */
+html.dark .admin-page .text-gray-800 { color: rgb(226 232 240); }         /* slate-200 */
+html.dark .admin-page .text-gray-700 { color: rgb(203 213 225); }         /* slate-300 */
+html.dark .admin-page .text-gray-600 { color: rgb(148 163 184); }         /* slate-400 */
+html.dark .admin-page .text-gray-500 { color: rgb(148 163 184); }         /* slate-400 */
+
+html.dark .admin-page input[type="text"],
+html.dark .admin-page input[type="url"],
+html.dark .admin-page input[type="password"],
+html.dark .admin-page input[type="number"],
+html.dark .admin-page select,
+html.dark .admin-page textarea {
+  background-color: rgb(15 23 42); /* slate-900 */
+  color: rgb(226 232 240);          /* slate-200 */
+  border-color: rgb(71 85 105);    /* slate-600 */
+}
+
+/* Setup-tab info card uses bg-blue-50 — too bright in dark mode */
+html.dark .admin-page .bg-blue-50 { background-color: rgb(30 58 138 / 0.20); } /* blue-900 tint */
+html.dark .admin-page .border-blue-200 { border-color: rgb(30 64 175 / 0.40); }
+html.dark .admin-page .text-blue-900 { color: rgb(191 219 254); }   /* blue-200 */
+html.dark .admin-page .text-blue-800 { color: rgb(147 197 253); }   /* blue-300 */
+html.dark .admin-page .text-blue-700 { color: rgb(147 197 253); }
+html.dark .admin-page .text-blue-600 { color: rgb(147 197 253); }
+html.dark .admin-page .bg-blue-100 { background-color: rgb(30 58 138 / 0.30); }
+html.dark .admin-page .bg-blue-600 { background-color: rgb(37 99 235); }       /* unchanged */
+
+html.dark .admin-page .bg-yellow-50 { background-color: rgb(120 53 15 / 0.20); }
+html.dark .admin-page .border-yellow-200 { border-color: rgb(180 83 9 / 0.40); }
+html.dark .admin-page .text-yellow-900 { color: rgb(254 240 138); }
+html.dark .admin-page .text-yellow-800 { color: rgb(253 224 71); }
+html.dark .admin-page .text-yellow-700 { color: rgb(252 211 77); }
+html.dark .admin-page .bg-yellow-100 { background-color: rgb(120 53 15 / 0.30); }
+html.dark .admin-page .bg-yellow-400 { background-color: rgb(245 158 11); }
+
+html.dark .admin-page .bg-green-100 { background-color: rgb(20 83 45 / 0.30); }
+html.dark .admin-page .border-green-200 { border-color: rgb(22 101 52 / 0.50); }
+html.dark .admin-page .text-green-800 { color: rgb(187 247 208); }
+html.dark .admin-page .text-green-700 { color: rgb(134 239 172); }
+html.dark .admin-page .text-green-600 { color: rgb(74 222 128); }
+
+html.dark .admin-page .bg-red-100 { background-color: rgb(127 29 29 / 0.30); }
+html.dark .admin-page .border-red-200 { border-color: rgb(153 27 27 / 0.50); }
+html.dark .admin-page .text-red-800 { color: rgb(252 165 165); }
+html.dark .admin-page .text-red-700 { color: rgb(248 113 113); }
+html.dark .admin-page .text-red-600 { color: rgb(248 113 113); }
+
+html.dark .admin-page .bg-amber-50 { background-color: rgb(120 53 15 / 0.20); }
+html.dark .admin-page .text-amber-700 { color: rgb(252 211 77); }
+
