@@ -1,33 +1,53 @@
 # Agentic Demo - Complete Application
 
-A sophisticated B2B sales demo platform featuring AI-powered chatbot, Lakera Guard integration, RAG capabilities, and ToolHive integration.
+A sophisticated B2B sales demo platform featuring AI-powered chatbot, multi-vendor
+LLM + guardrail integration, RAG capabilities, and MCP tools.
 
 ## 🚀 Features
 
+### Core platform
 - **Skinnable B2B Landing Page** with customizable branding
 - **AI Chatbot** with ReAct agent architecture and smart autocomplete
-- **Lakera Guard Integration** with blocking/watching modes for content moderation
-- **Demo Prompt Corpus** with autocomplete functionality (right arrow key trigger)
+- **Multi-turn conversation memory** (history threaded into every turn)
+- **Streaming chat** (SSE) with token-by-token rendering
+- **One-click demo scenarios** — 4 fake-company personas (CredFlow, NimbusVault, SafeHarbor, Vitalis) swap branding + system prompt + demo prompts in a single click
+- **Bilingual UI** — English / Thai toggle, with **Light / Dark** mode
+- **Demo Prompt Corpus** with autocomplete (right-arrow trigger)
 - **RAG System** supporting file uploads and AI-generated seed packs
-- **ToolHive Integration** via MCP tools
-- **Admin Console** for complete configuration management
-- **Export/Import** configuration as ZIP with selective sections (appearance, LLM, security, RAG, demo prompts, tools, etc.)
+- **MCP Tools** via ToolHive integration
+- **Admin Console** with selective ZIP export/import (sections: appearance, LLM, security, RAG, demo prompts, tools)
+
+### Multi-provider integrations
+- **9 LLM providers**: OpenAI, Anthropic, Google (Gemini), Mistral, Groq, Together AI, Ollama (local), self-hosted LiteLLM proxy, Portkey AI Gateway (incl. self-managed)
+- **6 Guardrail providers**: Lakera Guard, OpenAI Moderation, AWS Bedrock Guardrails, Azure AI Content Safety, Palo Alto Prisma AIRS, Cloudflare Firewall for AI
+- Per-provider key slots — switching providers does not require re-entering credentials
+- Catalog-driven UI — dropdowns auto-populate from `/api/providers` and `/api/guardrail-providers`
+
+### Threat Lab (Admin tab)
+- **Audit log** — every chat/guardrail call captured; CSV export for compliance demos
+- **Guardrail compare** — fan one prompt to every configured guardrail in parallel, show per-vendor verdict + latency
+- **OWASP LLM Top 10 (2025) playbook** — 10-prompt suite scored against the active guardrail, aggregate detection rate
+- **Recordings** — capture a sequence of prompts and replay them through the current agent stack
+- **Lakera on vs off compare** — side-by-side response panes
+- **Image moderation** — `POST /api/moderation/image` with the active guardrail provider (Lakera / OpenAI Moderation / Azure)
 
 ## 🏗️ Architecture
 
-- **Frontend**: Vite + React + TypeScript + Tailwind CSS
+- **Frontend**: Vite + React + TypeScript + Tailwind CSS (`dark:` class strategy, EN/TH context)
 - **Backend**: FastAPI + SQLite + ChromaDB
-- **LLM**: OpenAI or LiteLLM proxy (chat + embeddings)
+- **LLM dispatch**: all 9 providers routed through `litellm.completion()` for a single tool-calling-aware code path
+- **Guardrail abstraction**: every provider implements `GuardrailProvider.check_interaction()` and returns the Lakera-shaped status dict so the UI overlay doesn't care which vendor is active
 - **Vector DB**: ChromaDB for RAG
-- **Security**: Lakera Guard for content moderation
 
 ## 📋 Prerequisites
 
-- Python 3.8–3.12 (3.13+ may break some deps like pandas; use `pyenv` or Homebrew `python@3.12` if needed)
+- Python 3.10–3.12 (3.13+ may break some deps like pandas; use `pyenv` or Homebrew `python@3.12` if needed)
 - Node.js 16+
 - Docker (required for LiteLLM + Postgres auto-bootstrap)
-- **OpenAI API key** or **LiteLLM API key** (master or virtual; configure in Admin → Security)
-- Lakera API key (optional)
+- **At least one LLM provider key** — OpenAI / Anthropic / Google / Mistral / Groq / Together / Portkey,
+  or a self-hosted endpoint (Ollama / LiteLLM proxy)
+- **At least one Guardrail provider key (optional)** — Lakera, OpenAI Moderation (free, reuses your OpenAI key),
+  AWS Bedrock, Azure AI Content Safety, Palo Alto Prisma AIRS, or Cloudflare Firewall for AI
 
 ## 🛠️ Installation
 
@@ -165,12 +185,26 @@ Useful scripts:
 
 1. Navigate to the Admin Console at http://localhost:3000/admin
 2. Go to the **Security** tab
-3. Enter your OpenAI API key
-4. Optionally enter your Lakera API key and enable Lakera Guard
-5. If using LiteLLM + Lakera guardrails, set guardrail names in Admin → Security to match `litellm/config.yaml`:
+3. Pick your **LLM provider** from the dropdown and enter its API key
+   (slots are kept per provider so you can pre-stage several and switch live)
+4. Pick your **Guardrail provider** and enter its credentials
+   (Lakera, OpenAI Moderation, Bedrock, Azure Content Safety, Palo Alto AIRS, Cloudflare Firewall for AI)
+5. If using LiteLLM proxy + Lakera guardrails, set guardrail names in Admin → Security to match `litellm/config.yaml`:
    - blocking: `lakera-guard-block`
    - monitor: `lakera-guard-monitor`
-5. Configure other settings as needed
+6. (Optional) Open the **Threat Lab** tab for the audit log, guardrail compare matrix, OWASP playbook runner, and recordings
+
+### 1b. One-click demo personas
+
+The Landing page has four logo buttons (CredFlow, NimbusVault, SafeHarbor,
+Vitalis). Clicking one swaps branding + system prompt + the entire demo prompt
+corpus in a single API call — useful when running back-to-back demos for
+different verticals.
+
+### 1c. EN/TH and Light/Dark
+
+Top-right of every page: language segmented control (EN/TH) and a sun/moon
+button. Both persist via `localStorage` and survive reloads.
 
 ### 2. Branding Customization
 
@@ -222,89 +256,154 @@ In the **Demo Prompts** tab:
 All API routes are under the `/api` prefix.
 
 ### Config
-- `GET /api/config` - Get current configuration
-- `PUT /api/config` - Update configuration
-- `GET /api/config/export` - Export config as a **ZIP file** (query: `?include=appearance,llm,...` and `?version=2`; omit include = safe default sections)
-- `POST /api/config/import` - Import config from an exported **ZIP file** (merge by section)
+- `GET /api/config` — Get current configuration
+- `PUT /api/config` — Update configuration
+- `GET /api/config/export` — Export config as a **ZIP** (query: `?include=appearance,llm,...&version=2`; omit include = safe default sections)
+- `POST /api/config/import` — Import config from an exported ZIP (merge by section)
+
+### Catalogs (drive the Admin dropdowns)
+- `GET /api/providers` — Available LLM providers (9)
+- `GET /api/guardrail-providers` — Available guardrail providers (6)
+- `GET /api/models` — Models for the active LLM provider (dynamic for proxy/Ollama, else static)
 
 ### Chat
-- `POST /api/chat` - Send message to AI assistant
+- `POST /api/chat` — Send a message; returns response + guardrail status + `conversation_id`
+- `POST /api/chat/stream` — Streaming SSE variant (events: `chunk`, `done`, `blocked`, `error`)
+- `POST /api/chat/compare` — Run the same prompt with Lakera on **and** off, return both panes
+- `POST /api/chat/compare-guardrails` — Fan one prompt to every configured guardrail in parallel
+
+### Conversations (multi-turn memory)
+- `GET /api/conversations`
+- `GET /api/conversations/{id}` — Full message history
+- `DELETE /api/conversations/{id}`
+
+### Audit log
+- `GET /api/audit?limit=200&flagged_only=true` — JSON entries
+- `GET /api/audit?format=csv` — CSV export attachment
+- `DELETE /api/audit` — Wipe entries (admin / demo-reset only)
+
+### Guardrails
+- `GET /api/lakera/last` — Last Lakera result (legacy frontend overlay)
+- `POST /api/moderation/image` — Scan an image with the active guardrail (`{ image_data_url }`)
+
+### Playbooks (security suites)
+- `GET /api/playbooks` — Catalog (currently OWASP LLM Top 10 2025)
+- `POST /api/playbooks/{id}/run` — Score every prompt through the active guardrail
+
+### Recordings (demo replay)
+- `GET /api/recordings` — List
+- `POST /api/recordings` — Save `{ name, events }`
+- `GET /api/recordings/{id}` — Full payload
+- `POST /api/recordings/{id}/replay` — Re-run every prompt through the current agent
+- `DELETE /api/recordings/{id}`
+
+### Scenarios (one-click company switcher)
+- `GET /api/scenarios` — List previews
+- `POST /api/scenarios/{id}/apply` — Apply branding + prompts
 
 ### RAG
-- `POST /api/rag/upload` - Upload documents
-- `POST /api/rag/generate` - Generate AI content
-- `GET /api/rag/search` - Search stored content
+- `POST /api/rag/upload` — Upload documents
+- `POST /api/rag/generate` — Generate AI content
+- `GET /api/rag/search` — Search stored content
 
 ### Tools
-- `GET /api/tools` - List tools
-- `POST /api/tools` - Create tool
-- `PUT /api/tools/{id}` - Update tool
-- `DELETE /api/tools/{id}` - Delete tool
-- `POST /api/tools/test/{id}` - Test tool
-
-### Lakera
-- `GET /api/lakera/last` - Get last guardrail result
+- `GET /api/tools` — List tools
+- `POST /api/tools` — Create tool
+- `PUT /api/tools/{id}` — Update tool
+- `DELETE /api/tools/{id}` — Delete tool
+- `POST /api/tools/test/{id}` — Test tool
 
 ### Demo Prompts
-- `GET /api/demo-prompts` - List demo prompts
-- `GET /api/demo-prompts/search` - Search demo prompts with autocomplete
-- `POST /api/demo-prompts` - Create demo prompt
-- `PUT /api/demo-prompts/{id}` - Update demo prompt
-- `DELETE /api/demo-prompts/{id}` - Delete demo prompt
-- `POST /api/demo-prompts/{id}/use` - Track prompt usage
+- `GET /api/demo-prompts` — List demo prompts
+- `GET /api/demo-prompts/search` — Search with autocomplete suggestions
+- `POST /api/demo-prompts` — Create
+- `PUT /api/demo-prompts/{id}` — Update
+- `DELETE /api/demo-prompts/{id}` — Delete
+- `POST /api/demo-prompts/{id}/use` — Track usage
 
 ## 📁 Project Structure
 
 ```
 guard-demo-client/
-├── backend/                 # FastAPI backend
-│   ├── __init__.py
-│   ├── main.py             # FastAPI app, config export/import
-│   ├── models.py           # SQLAlchemy models
-│   ├── schemas.py          # Pydantic schemas
-│   ├── database.py         # Database connection
-│   ├── llm_client.py       # LLM integration (OpenAI or LiteLLM proxy)
-│   ├── rag.py              # RAG service, ChromaDB
-│   ├── lakera.py           # Lakera integration
-│   ├── toolhive.py         # ToolHive service
-│   └── agent.py            # ReAct agent
-├── src/                    # React frontend
-│   ├── components/         # React components
-│   │   ├── ChatWidget.tsx  # Chat with autocomplete
-│   │   ├── DemoPromptManager.tsx # Prompt management
-│   │   ├── LakeraOverlay.tsx    # Guard results
-│   │   └── ...
-│   ├── pages/              # Page components
-│   ├── services/           # API services
-│   ├── types/              # TypeScript types
-│   └── ...
-├── data/                   # Data storage
-│   ├── agentic_demo.db     # SQLite database
-│   ├── chroma/             # ChromaDB vectors (default)
-│   └── chroma_import/      # ChromaDB after import (if used)
-├── uploads/                # Uploaded files
-├── requirements.txt        # Python dependencies
-├── package.json            # Node.js dependencies
-├── start_all.py            # Start backend + frontend (recommended)
-├── start_backend.py        # Backend-only startup
-└── README.md               # This file
+├── backend/                       # FastAPI backend
+│   ├── main.py                    # Routes, inline SQLite migrations
+│   ├── models.py                  # SQLAlchemy: AppConfig, Conversation, Message,
+│   │                              #   AuditLog, SessionRecording, Tool, RagSource, DemoPrompt
+│   ├── schemas.py                 # Pydantic schemas
+│   ├── database.py                # SQLite engine
+│   ├── agent.py                   # ReAct agent (pre-guard → RAG → tools → LLM → post-guard)
+│   ├── llm_client.py              # LiteLLM dispatch for all 9 providers + SSE streaming
+│   ├── providers.py               # LLM provider catalog (OpenAI/Anthropic/Google/...)
+│   ├── audit.py                   # Audit log writer + CSV export
+│   ├── playbooks.py               # OWASP LLM Top 10 (2025) suite
+│   ├── scenarios.py               # 4 one-click demo company personas
+│   ├── rag.py                     # RAG service, ChromaDB
+│   ├── lakera.py                  # Legacy Lakera REST client + UI state
+│   ├── toolhive.py                # MCP tool execution
+│   └── guardrail_provider/        # Unified guardrail abstraction
+│       ├── base.py                # GuardrailProvider ABC + Lakera-shaped status
+│       ├── registry.py            # Catalog + active resolver + UI metadata
+│       ├── lakera_provider.py
+│       ├── openai_moderation_provider.py
+│       ├── bedrock_provider.py    # AWS Bedrock Guardrails (ApplyGuardrail)
+│       ├── azure_content_safety_provider.py  # text:analyze + text:shieldPrompt + image:analyze
+│       ├── palo_alto_provider.py  # Prisma AIRS /v1/scan/sync/request
+│       └── cloudflare_provider.py # Workers AI Llama Guard 3 (S1–S14 taxonomy)
+├── src/                            # React frontend
+│   ├── components/
+│   │   ├── ChatWidget.tsx          # Chat + stream toggle + conversation_id threading
+│   │   ├── ThreatLab.tsx           # Admin tab: audit / compare / OWASP / recordings
+│   │   ├── CompareDialog.tsx       # Lakera-on vs Lakera-off side-by-side
+│   │   ├── ScenarioSwitcher.tsx    # One-click company logo bar
+│   │   ├── UIToggles.tsx           # EN/TH + Light/Dark switches
+│   │   ├── LakeraOverlay.tsx       # Per-detector verdict panel
+│   │   ├── DemoPromptManager.tsx
+│   │   ├── ToolManager.tsx
+│   │   └── RagManagement.tsx
+│   ├── pages/                      # AdminConsole, LandingPage
+│   ├── services/api.ts             # Typed REST + SSE iterator
+│   ├── i18n/                       # EN/TH dictionaries + UIContext
+│   └── types/
+├── data/
+│   ├── agentic_demo.db             # SQLite
+│   ├── chroma/                     # ChromaDB vectors (default)
+│   └── chroma_import/              # ChromaDB after import (if used)
+├── fakecompanies/                  # Bundled logos + hero images for scenarios
+├── litellm/                        # LiteLLM proxy Dockerised config
+├── scripts/                        # stop_demo_stack.sh, fresh_start_demo.sh
+├── requirements.txt
+├── package.json
+├── start_all.py                    # Start backend + frontend + LiteLLM (recommended)
+├── start_backend.py                # Backend-only
+└── README.md
 ```
 
 ## 🎯 Demo Features
 
 ### Chat Interface
 - Real-time chat with AI assistant
+- **Streaming mode** (SSE) — token-by-token rendering, toggle below the input
+- **Multi-turn memory** — `conversation_id` threaded automatically; "New chat" button to reset
 - Smart autocomplete with demo prompt corpus
 - Tool usage tracking
-- Lakera guardrail monitoring
+- Guardrail status overlay (works for every guardrail provider)
 - Message history
 
-### Lakera Integration
-- Content moderation with blocking/watching modes
-- Direct Lakera API checks or LiteLLM-native Lakera guardrails (when LiteLLM mode is enabled)
-- Guardrail enforcement (blocking mode) or monitoring (watching mode)
-- Unified Lakera result shape for the frontend overlay in either provider mode
-- Detailed violation reporting with TL;DR summaries
+### Guardrail Integration
+- Six interchangeable providers — switch from the Admin → Security dropdown
+- Blocking vs Monitor mode applies to all providers
+- LiteLLM-native Lakera guardrails when LiteLLM proxy is active
+- Unified Lakera-shaped result dict so the UI overlay is provider-agnostic
+- Per-detector breakdown with TL;DR summaries
+
+### Threat Lab (Admin)
+- **Audit log** — full history, CSV export, "Flagged only" filter
+- **Compare matrix** — fan a single prompt to every configured guardrail in parallel
+- **OWASP playbook runner** — score Top-10-for-LLMs against your active vendor
+- **Recordings** — save and replay prompt sequences through the current agent
+
+### Compare on the Landing page
+- Lakera-on vs Lakera-off side-by-side modal (`POST /api/chat/compare`)
 
 ### RAG Capabilities
 - Document upload (PDF, MD, TXT, CSV)
@@ -372,8 +471,8 @@ See [CHANGELOG.md](CHANGELOG.md) for recent changes (LiteLLM integration, model 
 ### Common Issues
 
 1. **Backend won't start**
-   - Check Python version (3.8+)
-   - Verify all dependencies installed
+   - Check Python version (3.10–3.12)
+   - Verify all dependencies installed (`pip install -r requirements.txt`)
    - Check port 8000 availability
 
 2. **Frontend won't start**
