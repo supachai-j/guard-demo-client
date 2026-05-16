@@ -30,6 +30,9 @@ def record_chat_turn(
     latency_ms: Optional[int] = None,
     blocked: bool = False,
     error: Optional[str] = None,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
+    cost_usd: Optional[float] = None,
 ) -> Optional[int]:
     """Write one audit row. Returns the row id, or None on failure
     (never raises — audit writes must not break the chat flow)."""
@@ -50,6 +53,9 @@ def record_chat_turn(
             latency_ms=latency_ms,
             blocked=blocked,
             error=error,
+            input_tokens=input_tokens or 0,
+            output_tokens=output_tokens or 0,
+            cost_usd=str(cost_usd) if cost_usd is not None else None,
         )
         db.add(row)
         db.commit()
@@ -98,6 +104,9 @@ def _row_to_dict(r: AuditLog) -> Dict[str, Any]:
         "latency_ms": r.latency_ms,
         "blocked": bool(r.blocked),
         "error": r.error,
+        "input_tokens": r.input_tokens or 0,
+        "output_tokens": r.output_tokens or 0,
+        "cost_usd": float(r.cost_usd) if (r.cost_usd not in (None, "")) else None,
     }
 
 
@@ -109,6 +118,7 @@ def to_csv(entries: List[Dict[str, Any]]) -> str:
         "id", "created_at", "session_id", "conversation_id",
         "llm_provider", "llm_model", "guardrail_provider",
         "guardrail_flagged", "blocked", "latency_ms",
+        "input_tokens", "output_tokens", "cost_usd",
         "user_message", "assistant_response",
         "guardrail_breakdown", "tool_traces", "error",
     ]

@@ -320,6 +320,50 @@ class ApiService {
     return this.request(`/recordings/${id}`, { method: 'DELETE' });
   }
 
+  // Cost summary
+  async getCostSummary(): Promise<{ total_cost_usd: number; total_input_tokens: number; total_output_tokens: number; by_provider: any[] }> {
+    return this.request('/audit/cost-summary');
+  }
+
+  exportAuditPdfUrl(): string {
+    return `${API_BASE}/audit/report.pdf?limit=500`;
+  }
+
+  // Compare LLMs (fan to multiple LLM providers)
+  async compareLlms(message: string, providers: { provider: string; model: string }[]): Promise<{ message: string; results: any[] }> {
+    return this.request('/chat/compare-llms', {
+      method: 'POST',
+      body: JSON.stringify({ message, providers }),
+    });
+  }
+
+  // Health checks
+  async healthProviders(): Promise<{ providers: any[] }> {
+    return this.request('/health/providers');
+  }
+
+  // Batch eval — CSV upload
+  async batchRun(file: File): Promise<any> {
+    const fd = new FormData();
+    fd.append('file', file);
+    const resp = await fetch(`${API_BASE}/batch/run`, { method: 'POST', body: fd });
+    if (!resp.ok) return this.parseError(resp, 'batch run failed');
+    return resp.json();
+  }
+
+  // Webhook test
+  async testWebhook(url: string): Promise<{ ok: boolean; status: number; body?: string; error?: string }> {
+    return this.request('/webhook/test', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    });
+  }
+
+  // Auth status (does admin auth env-gate require basic auth?)
+  async authStatus(): Promise<{ enabled: boolean }> {
+    return this.request('/auth/status');
+  }
+
   // Streaming chat — returns an async iterator of token strings.
   async *streamChat(message: string, conversationId?: number, sessionId?: string): AsyncGenerator<{ kind: 'chunk' | 'done' | 'blocked' | 'error'; data: any }> {
     const resp = await fetch(`${API_BASE}/chat/stream`, {

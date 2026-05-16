@@ -45,6 +45,13 @@ export interface AppConfig {
   // Portkey (LLM gateway)
   portkey_api_key?: string;
   portkey_virtual_key?: string;
+  portkey_base_url?: string;
+  // Cloudflare Firewall for AI
+  cloudflare_account_id?: string;
+  cloudflare_api_token?: string;
+  cloudflare_gateway_id?: string;
+  // Webhook
+  webhook_url?: string;
   created_at: string;
   updated_at: string;
 }
@@ -94,6 +101,13 @@ export interface AppConfigUpdate {
   // Portkey (LLM gateway)
   portkey_api_key?: string;
   portkey_virtual_key?: string;
+  portkey_base_url?: string;
+  // Cloudflare Firewall for AI
+  cloudflare_account_id?: string;
+  cloudflare_api_token?: string;
+  cloudflare_gateway_id?: string;
+  // Webhook
+  webhook_url?: string;
 }
 
 // Guardrail provider catalog (GET /api/guardrail-providers)

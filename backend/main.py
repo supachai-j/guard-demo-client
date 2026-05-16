@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import audit, lakera, llm_client, rag
+from . import audit, auth as _auth, costs as cost_module, lakera, llm_client, rag, webhooks
 from .agent import AgentRequest, run_agent
 from .database import engine, get_db
 from .models import (
@@ -252,6 +252,31 @@ def _migrate_app_config_cloudflare():
 _migrate_app_config_portkey_base_url()
 _migrate_app_config_cloudflare()
 
+
+def _migrate_app_config_webhook():
+    """Add webhook_url for outbound flag notifications."""
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(app_config)"))
+        columns = [row[1] for row in r.fetchall()]
+        if "webhook_url" not in columns:
+            conn.execute(text("ALTER TABLE app_config ADD COLUMN webhook_url VARCHAR"))
+            conn.commit()
+
+
+def _migrate_audit_log_tokens():
+    """Add token / cost columns to audit_log."""
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(audit_log)"))
+        columns = [row[1] for row in r.fetchall()]
+        for name, ctype in [("input_tokens", "INTEGER"), ("output_tokens", "INTEGER"), ("cost_usd", "VARCHAR")]:
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE audit_log ADD COLUMN {name} {ctype}"))
+                conn.commit()
+
+
+_migrate_app_config_webhook()
+_migrate_audit_log_tokens()
+
 app = FastAPI(title="Agentic Demo API", description="Backend API for the Agentic Demo application", version="1.0.0")
 
 # CORS middleware
@@ -288,6 +313,12 @@ async def health_check():
     return {"status": "healthy"}
 
 
+@app.get("/api/auth/status")
+async def get_auth_status():
+    """Whether the admin endpoints require basic-auth (env-gated)."""
+    return _auth.auth_status()
+
+
 # App Config endpoints
 @app.get("/api/config", response_model=AppConfigResponse)
 async def get_config(db: Session = Depends(get_db)):
@@ -301,7 +332,7 @@ async def get_config(db: Session = Depends(get_db)):
     return config
 
 
-@app.put("/api/config", response_model=AppConfigResponse)
+@app.put("/api/config", response_model=AppConfigResponse, dependencies=[Depends(_auth.require_admin)])
 async def update_config(config_update: AppConfigUpdate, db: Session = Depends(get_db)):
     config = db.query(AppConfig).first()
     if not config:
@@ -1732,6 +1763,368 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
         "total": total,
         "results": results,
     }
+
+
+# Webhook test
+@app.post("/api/webhook/test", dependencies=[Depends(_auth.require_admin)])
+async def test_webhook(payload: dict, db: Session = Depends(get_db)):
+    """Send a synthetic 'guardrail.test' event to the saved webhook_url so the
+    admin can verify the integration before relying on it."""
+    config = db.query(AppConfig).first()
+    url = (payload or {}).get("url") or (config and config.webhook_url) or ""
+    if not url.strip():
+        raise HTTPException(status_code=400, detail="webhook_url is empty")
+    result = await webhooks.fire_test_event(url.strip())
+    return result
+
+
+# Audit cost summary — for the Threat Lab Cost panel
+@app.get("/api/audit/cost-summary")
+async def audit_cost_summary(db: Session = Depends(get_db)):
+    """Aggregate audit_log into per-provider cost/tokens for the Cost panel."""
+    rows = audit.list_entries(db, limit=1000)
+    by_provider: Dict[str, Dict[str, float]] = {}
+    total_cost = 0.0
+    total_in = 0
+    total_out = 0
+    for r in rows:
+        prov = r.get("llm_provider") or "—"
+        bucket = by_provider.setdefault(prov, {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cost_usd": 0.0})
+        bucket["calls"] += 1
+        bucket["input_tokens"] += r.get("input_tokens") or 0
+        bucket["output_tokens"] += r.get("output_tokens") or 0
+        cost = r.get("cost_usd") or 0.0
+        bucket["cost_usd"] += cost
+        total_cost += cost
+        total_in += r.get("input_tokens") or 0
+        total_out += r.get("output_tokens") or 0
+    return {
+        "total_cost_usd": round(total_cost, 6),
+        "total_input_tokens": total_in,
+        "total_output_tokens": total_out,
+        "by_provider": [{"provider": k, **{kk: (round(vv, 6) if isinstance(vv, float) else vv) for kk, vv in v.items()}}
+                        for k, v in by_provider.items()],
+    }
+
+
+# PDF audit report — render audit log summary as a printable PDF
+@app.get("/api/audit/report.pdf")
+async def audit_report_pdf(limit: int = 200, db: Session = Depends(get_db)):
+    """Render the last N audit entries as a 1-2 page PDF summary."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+
+    entries = audit.list_entries(db, limit=min(max(limit, 1), 500))
+    total = len(entries)
+    flagged = sum(1 for e in entries if e.get("guardrail_flagged"))
+    blocked = sum(1 for e in entries if e.get("blocked"))
+    total_cost = sum((e.get("cost_usd") or 0.0) for e in entries)
+    by_provider: Dict[str, int] = {}
+    for e in entries:
+        by_provider[e.get("guardrail_provider") or "—"] = by_provider.get(e.get("guardrail_provider") or "—", 0) + 1
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=1.5 * cm, rightMargin=1.5 * cm,
+                             topMargin=1.5 * cm, bottomMargin=1.5 * cm)
+    styles = getSampleStyleSheet()
+    title_style = ParagraphStyle("title", parent=styles["Title"], spaceAfter=6)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], spaceBefore=12, spaceAfter=4)
+    body = styles["BodyText"]
+
+    story = []
+    story.append(Paragraph("guard-demo-client — Audit Summary", title_style))
+    story.append(Paragraph(f"Generated {datetime.utcnow().isoformat(timespec='seconds')}Z · last {total} entries", body))
+    story.append(Spacer(1, 0.4 * cm))
+
+    story.append(Paragraph("Summary", h2))
+    summary_data = [
+        ["Total entries", str(total)],
+        ["Flagged by guardrail", f"{flagged} ({100*flagged/total:.0f}%)" if total else "0"],
+        ["Blocked (blocking mode)", str(blocked)],
+        ["Total estimated cost (USD)", f"${total_cost:.4f}"],
+    ]
+    summary_tbl = Table(summary_data, colWidths=[6 * cm, 8 * cm])
+    summary_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2ff")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("FONTNAME", (0, 0), (-1, -1), "Helvetica"),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("PADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(summary_tbl)
+
+    story.append(Paragraph("Entries by guardrail provider", h2))
+    rows = [["Provider", "Count"]] + [[k, str(v)] for k, v in by_provider.items()]
+    prov_tbl = Table(rows, colWidths=[10 * cm, 4 * cm])
+    prov_tbl.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#eef2ff")),
+        ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#cbd5e1")),
+        ("FONTSIZE", (0, 0), (-1, -1), 9),
+        ("PADDING", (0, 0), (-1, -1), 4),
+    ]))
+    story.append(prov_tbl)
+
+    story.append(Paragraph("Latest flagged events (max 20)", h2))
+    flagged_entries = [e for e in entries if e.get("guardrail_flagged")][:20]
+    if flagged_entries:
+        head = ["When", "Provider", "Prompt (truncated)"]
+        rows = [head]
+        for e in flagged_entries:
+            when = (e.get("created_at") or "")[:19].replace("T", " ")
+            prompt_ = (e.get("user_message") or "")[:80]
+            rows.append([when, e.get("guardrail_provider") or "", prompt_])
+        flag_tbl = Table(rows, colWidths=[4 * cm, 3 * cm, 10 * cm])
+        flag_tbl.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#fef2f2")),
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.HexColor("#fecaca")),
+            ("FONTSIZE", (0, 0), (-1, -1), 7),
+            ("PADDING", (0, 0), (-1, -1), 3),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ]))
+        story.append(flag_tbl)
+    else:
+        story.append(Paragraph("No flagged events in this window.", body))
+
+    doc.build(story)
+    buf.seek(0)
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue()),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=audit_report_{timestamp}.pdf"},
+    )
+
+
+# Batch eval — upload CSV of prompts, return verdict matrix
+@app.post("/api/batch/run")
+async def batch_run(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload a CSV with a 'prompt' column (or one prompt per line if no
+    header). For each prompt, run the active guardrail and return verdict +
+    breakdown. Skips the LLM call — guardrail-only eval, optimised for speed
+    on 100+ prompts."""
+    import csv
+    import io as _io
+
+    from .guardrail_provider import GUARDRAIL_PROVIDERS, active_provider_id
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    pid = active_provider_id(config)
+    provider = GUARDRAIL_PROVIDERS.get(pid)
+    if not provider or not provider.is_configured(config):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Active guardrail provider '{pid}' is not configured.",
+        )
+
+    content = (await file.read()).decode("utf-8", errors="replace")
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="empty file")
+
+    # Try CSV with header first; fall back to one-prompt-per-line.
+    prompts: List[str] = []
+    sniff = content[:512]
+    if "," in sniff or '"' in sniff:
+        try:
+            reader = csv.DictReader(_io.StringIO(content))
+            field = None
+            for cand in ("prompt", "Prompt", "text", "Text", "message"):
+                if reader.fieldnames and cand in reader.fieldnames:
+                    field = cand
+                    break
+            if field:
+                prompts = [(row.get(field) or "").strip() for row in reader if (row.get(field) or "").strip()]
+        except Exception:
+            prompts = []
+    if not prompts:
+        prompts = [ln.strip() for ln in content.splitlines() if ln.strip() and not ln.startswith("#")]
+
+    if not prompts:
+        raise HTTPException(status_code=400, detail="no prompts found in file")
+    if len(prompts) > 500:
+        raise HTTPException(status_code=400, detail="too many prompts (max 500 per batch)")
+
+    results: List[Dict[str, Any]] = []
+    for prompt_text in prompts:
+        try:
+            status = await provider.check_interaction(
+                messages=[{"role": "user", "content": prompt_text}],
+                cfg=config,
+                meta=None,
+                system_prompt=config.system_prompt,
+            )
+            results.append({
+                "prompt": prompt_text,
+                "flagged": bool(status and status.get("flagged")),
+                "breakdown": (status or {}).get("breakdown") or [],
+            })
+        except Exception as e:
+            results.append({"prompt": prompt_text, "flagged": False, "error": str(e)})
+
+    detected = sum(1 for r in results if r.get("flagged"))
+    return {
+        "guardrail_provider": pid,
+        "guardrail_display_name": provider.display_name,
+        "total": len(results),
+        "detected": detected,
+        "detection_rate": round(100.0 * detected / len(results), 1) if results else 0.0,
+        "results": results,
+    }
+
+
+# Provider health checks — ping every configured LLM + guardrail
+@app.get("/api/health/providers")
+async def health_providers(db: Session = Depends(get_db)):
+    """For each configured LLM provider, send a 1-token "ping" request; for
+    each configured guardrail, run a benign 1-word check. Returns up/down +
+    latency per provider so the Admin Console can show a status panel.
+    """
+    import asyncio as _aio
+    import time as _t
+
+    from .guardrail_provider import GUARDRAIL_PROVIDERS
+    from .providers import PROVIDERS, provider_api_key
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+
+    async def _llm_check(pid: str):
+        meta = PROVIDERS.get(pid, {})
+        # Configured = either has API key or doesn't need one (Ollama, etc.)
+        has_key = bool(provider_api_key(_ConfigOverride(config, llm_provider=pid)))
+        if meta.get("needs_key") and not has_key:
+            return {"id": pid, "display_name": meta.get("display_name"), "kind": "llm",
+                    "configured": False, "ok": False, "latency_ms": 0, "error": None}
+        t0 = _t.monotonic()
+        try:
+            # Use the first static model as a smoke test target.
+            models = meta.get("models") or []
+            model = models[0] if models else config.openai_model
+            override = _ConfigOverride(config, llm_provider=pid, openai_model=model)
+            resp = llm_client.chat_completion(
+                messages=[{"role": "user", "content": "ping"}],
+                model=model,
+                temperature=0,
+                config=override,
+            )
+            ok = bool((resp or {}).get("choices"))
+            return {"id": pid, "display_name": meta.get("display_name"), "kind": "llm",
+                    "configured": True, "ok": ok, "latency_ms": int((_t.monotonic() - t0) * 1000),
+                    "error": None}
+        except Exception as e:
+            return {"id": pid, "display_name": meta.get("display_name"), "kind": "llm",
+                    "configured": True, "ok": False,
+                    "latency_ms": int((_t.monotonic() - t0) * 1000), "error": str(e)[:200]}
+
+    async def _guard_check(pid: str, provider):
+        if not provider.is_configured(config):
+            return {"id": pid, "display_name": provider.display_name, "kind": "guardrail",
+                    "configured": False, "ok": False, "latency_ms": 0, "error": None}
+        t0 = _t.monotonic()
+        try:
+            status = await provider.check_interaction(
+                messages=[{"role": "user", "content": "ping"}],
+                cfg=config,
+                meta=None,
+                system_prompt=None,
+            )
+            ok = status is not None
+            return {"id": pid, "display_name": provider.display_name, "kind": "guardrail",
+                    "configured": True, "ok": ok,
+                    "latency_ms": int((_t.monotonic() - t0) * 1000), "error": None}
+        except Exception as e:
+            return {"id": pid, "display_name": provider.display_name, "kind": "guardrail",
+                    "configured": True, "ok": False,
+                    "latency_ms": int((_t.monotonic() - t0) * 1000), "error": str(e)[:200]}
+
+    llm_tasks = [_llm_check(pid) for pid in PROVIDERS.keys()]
+    guard_tasks = [_guard_check(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items()]
+    results = await _aio.gather(*(llm_tasks + guard_tasks), return_exceptions=False)
+    return {"providers": results}
+
+
+# Compare-All LLMs — fan a prompt to multiple LLM providers in parallel
+@app.post("/api/chat/compare-llms")
+async def compare_llms(payload: dict, db: Session = Depends(get_db)):
+    """Run the same prompt through multiple LLM providers (each with its own
+    model + key as configured in AppConfig) and return per-provider response,
+    latency, tokens, and estimated cost. Sequential per provider to keep memory
+    use low, but each call honours the same /api/chat path so guardrails and
+    tools still fire.
+
+    Body: { message: str, providers: [{provider, model}], session_id?: str }
+    """
+    import asyncio as _aio
+    import copy
+    import time as _t
+
+    from .providers import PROVIDERS
+
+    message = (payload or {}).get("message") or ""
+    requested = (payload or {}).get("providers") or []
+    if not message.strip():
+        raise HTTPException(status_code=400, detail="message is required")
+    if not isinstance(requested, list) or not requested:
+        raise HTTPException(status_code=400, detail="providers must be a non-empty list")
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+
+    async def _run_one(p: dict):
+        pid = (p or {}).get("provider")
+        model = (p or {}).get("model")
+        if not pid or pid not in PROVIDERS:
+            return {"provider": pid, "model": model, "error": f"unknown provider {pid}"}
+        # Build a one-off cfg override so we use this provider's key/model
+        # without mutating the row.
+        override = _ConfigOverride(config, llm_provider=pid, openai_model=model or config.openai_model)
+        t0 = _t.monotonic()
+        try:
+            messages = []
+            if config.system_prompt:
+                messages.append({"role": "system", "content": config.system_prompt})
+            messages.append({"role": "user", "content": message})
+            resp = llm_client.chat_completion(
+                messages=messages,
+                model=model or config.openai_model,
+                temperature=config.temperature,
+                config=override,
+            )
+            in_t, out_t = cost_module.extract_token_usage(resp)
+            cost = cost_module.estimate_cost_usd(pid, model, in_t, out_t)
+            text_ = ((resp or {}).get("choices") or [{}])[0].get("message", {}).get("content") or ""
+            return {
+                "provider": pid,
+                "display_name": PROVIDERS[pid].get("display_name"),
+                "model": model,
+                "response": text_,
+                "latency_ms": int((_t.monotonic() - t0) * 1000),
+                "input_tokens": in_t,
+                "output_tokens": out_t,
+                "cost_usd": cost,
+                "error": None,
+            }
+        except Exception as e:
+            return {
+                "provider": pid,
+                "display_name": PROVIDERS.get(pid, {}).get("display_name"),
+                "model": model,
+                "response": None,
+                "latency_ms": int((_t.monotonic() - t0) * 1000),
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cost_usd": None,
+                "error": str(e),
+            }
+
+    results = await _aio.gather(*[_run_one(p) for p in requested])
+    return {"message": message, "results": results}
 
 
 # Guardrail compare — fan a prompt out to every configured guardrail provider

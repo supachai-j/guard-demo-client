@@ -59,6 +59,7 @@ class AppConfigResponse(AppConfigBase):
     cloudflare_account_id: Optional[str] = None
     cloudflare_api_token: Optional[str] = None
     cloudflare_gateway_id: Optional[str] = None
+    webhook_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -97,6 +98,7 @@ class AppConfigUpdate(AppConfigBase):
     cloudflare_account_id: Optional[str] = None
     cloudflare_api_token: Optional[str] = None
     cloudflare_gateway_id: Optional[str] = None
+    webhook_url: Optional[str] = None
 
 
 # Chat schemas

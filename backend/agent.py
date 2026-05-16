@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from . import audit, lakera, llm_client, rag, toolhive
+from . import audit, costs, lakera, llm_client, rag, toolhive, webhooks
 from .guardrail_provider import active_provider_id, resolve_provider
 from .models import AppConfig, Conversation, Message
 from .providers import provider_id as llm_provider_id
@@ -187,6 +187,8 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
     messages.append({"role": "user", "content": req.message})
 
     # Step 4: Call LLM with tools
+    total_input_tokens = 0
+    total_output_tokens = 0
     try:
         response = llm_client.chat_completion(
             messages=messages,
@@ -197,6 +199,9 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
             litellm_guardrail_name=litellm_guardrail if use_litellm_guardrails else None,
             litellm_metadata=litellm_guardrail_metadata,
         )
+        _in, _out = costs.extract_token_usage(response)
+        total_input_tokens += _in
+        total_output_tokens += _out
 
         # Extract the response
         assistant_message = response["choices"][0]["message"]
@@ -273,6 +278,9 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
                 litellm_guardrail_name=litellm_guardrail if use_litellm_guardrails else None,
                 litellm_metadata=litellm_guardrail_metadata,
             )
+            _in, _out = costs.extract_token_usage(final_response)
+            total_input_tokens += _in
+            total_output_tokens += _out
 
             # Get final response
             final_assistant_message = final_response["choices"][0]["message"]
@@ -335,6 +343,9 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
             lakera_status = {"flagged": False, "breakdown": [], "payload": [], "metadata": {"source": "litellm"}}
             lakera.set_last_result(lakera_status)
 
+        cost_usd = costs.estimate_cost_usd(
+            active_llm_pid, cfg.openai_model, total_input_tokens, total_output_tokens
+        )
         if persist and conv is not None:
             db.add(Message(conversation_id=conv.id, role="user", content=req.message,
                            flagged=False, guardrail_status=None))
@@ -355,7 +366,20 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
                 tool_traces=tool_traces,
                 latency_ms=int((time.monotonic() - _start_t) * 1000),
                 blocked=False,
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                cost_usd=cost_usd,
             )
+            # Fire-and-forget webhook on flag
+            if lakera_status and lakera_status.get("flagged"):
+                await webhooks.fire_flagged_event(
+                    cfg,
+                    user_message=req.message,
+                    assistant_response=response_text,
+                    guardrail_status=lakera_status,
+                    session_id=req.session_id,
+                    conversation_id=conv.id,
+                )
 
         return AgentResult(
             response=response_text,

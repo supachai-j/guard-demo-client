@@ -67,6 +67,8 @@ class AppConfig(Base):
     cloudflare_account_id = Column(String, nullable=True)
     cloudflare_api_token = Column(String, nullable=True)
     cloudflare_gateway_id = Column(String, nullable=True)
+    # Webhook (POSTed when a guardrail flags content)
+    webhook_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -168,6 +170,9 @@ class AuditLog(Base):
     latency_ms = Column(Integer, nullable=True)
     blocked = Column(Boolean, default=False)
     error = Column(Text, nullable=True)
+    input_tokens = Column(Integer, default=0)
+    output_tokens = Column(Integer, default=0)
+    cost_usd = Column(String, nullable=True)  # stored as text for arbitrary precision
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 
