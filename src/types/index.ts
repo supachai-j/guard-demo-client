@@ -29,6 +29,7 @@ export interface AppConfig {
   mistral_api_key?: string;
   groq_api_key?: string;
   together_api_key?: string;
+  openrouter_api_key?: string;
   ollama_base_url?: string;
   // Multi-guardrail
   guardrail_provider?: string;
@@ -85,6 +86,7 @@ export interface AppConfigUpdate {
   mistral_api_key?: string;
   groq_api_key?: string;
   together_api_key?: string;
+  openrouter_api_key?: string;
   ollama_base_url?: string;
   // Multi-guardrail
   guardrail_provider?: string;

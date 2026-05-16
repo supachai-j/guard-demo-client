@@ -35,12 +35,13 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "base_url_field": None,
         "litellm_prefix": "anthropic/",
         "needs_key": True,
+        # Claude 4.x family — older 3.x snapshots are deprecated on the API as of
+        # early 2026 and return 404. Keep this list aligned with
+        # https://docs.anthropic.com/en/docs/about-claude/models.
         "models": [
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022",
-            "claude-3-opus-20240229",
-            "claude-3-sonnet-20240229",
-            "claude-3-haiku-20240307",
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
         ],
     },
     "google": {
@@ -123,6 +124,30 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "litellm_prefix": "",
         "needs_key": False,  # some proxies allow empty bearer
         "models": [],  # fetched dynamically from /v1/models
+    },
+    "openrouter": {
+        "display_name": "OpenRouter (AI Gateway)",
+        "key_field": "openrouter_api_key",
+        "base_url_field": None,
+        # LiteLLM routes via the `openrouter/` prefix; OpenRouter model ids
+        # already contain a vendor/family segment (e.g. anthropic/claude-3.5-sonnet),
+        # so the final dispatched model string becomes openrouter/anthropic/claude-3.5-sonnet.
+        "litellm_prefix": "openrouter/",
+        "needs_key": True,
+        "models": [
+            "anthropic/claude-3.5-sonnet",
+            "anthropic/claude-3.5-haiku",
+            "openai/gpt-4o",
+            "openai/gpt-4o-mini",
+            "google/gemini-2.0-flash-exp",
+            "google/gemini-pro-1.5",
+            "meta-llama/llama-3.1-405b-instruct",
+            "meta-llama/llama-3.1-70b-instruct",
+            "mistralai/mistral-large",
+            "deepseek/deepseek-chat",
+            "x-ai/grok-2",
+            "qwen/qwen-2.5-72b-instruct",
+        ],
     },
     "portkey": {
         "display_name": "Portkey (AI Gateway)",

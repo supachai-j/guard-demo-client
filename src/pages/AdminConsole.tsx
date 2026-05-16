@@ -10,6 +10,7 @@ import RagManagement, { RagManagementRef } from '../components/RagManagement';
 import DemoPromptManager from '../components/DemoPromptManager';
 import UIToggles from '../components/UIToggles';
 import ThreatLab from '../components/ThreatLab';
+import AttackFeed from '../components/AttackFeed';
 import { useUI } from '../i18n/UIContext';
 import { useAuth } from '../auth/AuthContext';
 import { LogOut } from 'lucide-react';
@@ -449,6 +450,7 @@ const AdminConsole: React.FC = () => {
 
   return (
     <div className="admin-page min-h-screen bg-gray-50 dark:bg-slate-900">
+      <AttackFeed />
       {/* Header */}
       <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-gray-200 dark:border-slate-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -752,15 +754,125 @@ const AdminConsole: React.FC = () => {
           {activeTab === 'llm' && (
             <div className="space-y-6">
               <h2 className="text-lg font-semibold text-gray-900">LLM Configuration</h2>
+
+              {/* Provider + key + (optional) base URL — moved here from Security so
+                  provider + model live together. */}
+              {(() => {
+                const activeProviderId = config.llm_provider || (config.use_litellm ? 'litellm_proxy' : 'openai');
+                const activeProvider = providers.find((p) => p.id === activeProviderId);
+                const keyField = activeProvider?.key_field as keyof AppConfig | null | undefined;
+                const baseField = activeProvider?.base_url_field as keyof AppConfig | null | undefined;
+                const keyValue = keyField ? ((config as any)[keyField] as string | undefined) : undefined;
+                const baseValue = baseField ? ((config as any)[baseField] as string | undefined) : undefined;
+                return (
+                  <div className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        LLM Provider
+                      </label>
+                      <select
+                        value={activeProviderId}
+                        onChange={(e) => handleConfigUpdate({ llm_provider: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      >
+                        {providers.length === 0 ? (
+                          <option value={activeProviderId}>{activeProviderId}</option>
+                        ) : (
+                          providers.map((p) => (
+                            <option key={p.id} value={p.id}>{p.display_name}</option>
+                          ))
+                        )}
+                      </select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Each provider stores its own key, so switching back and forth doesn&apos;t require re-entering credentials.
+                      </p>
+                    </div>
+
+                    {baseField && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          {activeProviderId === 'ollama' ? 'Ollama base URL' : 'LiteLLM base URL'}
+                        </label>
+                        <input
+                          type="text"
+                          value={baseValue || activeProvider?.default_base_url || ''}
+                          onChange={(e) => handleConfigUpdate({ [baseField]: e.target.value } as any)}
+                          placeholder={activeProvider?.default_base_url || ''}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                      </div>
+                    )}
+
+                    {activeProviderId === 'portkey' && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Portkey virtual key (optional)
+                        </label>
+                        <input
+                          type="text"
+                          value={config.portkey_virtual_key || ''}
+                          onChange={(e) => handleConfigUpdate({ portkey_virtual_key: e.target.value })}
+                          placeholder="vk-..."
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        />
+                        <p className="text-xs text-gray-500 mt-1">
+                          Portkey&apos;s virtual key abstracts the upstream provider (OpenAI/Anthropic/etc.). Leave empty if your Portkey config routes by other means.
+                        </p>
+                      </div>
+                    )}
+
+                    {keyField && (
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          {activeProvider?.display_name} API key
+                          {!activeProvider?.needs_key && (
+                            <span className="ml-2 text-xs text-gray-500">(optional)</span>
+                          )}
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showProviderKey ? 'text' : 'password'}
+                            value={keyValue || ''}
+                            onChange={(e) => handleConfigUpdate({ [keyField]: e.target.value } as any)}
+                            placeholder={
+                              activeProviderId === 'openai' ? 'sk-...' :
+                              activeProviderId === 'anthropic' ? 'sk-ant-...' :
+                              activeProviderId === 'google' ? 'AIza...' :
+                              activeProviderId === 'litellm_proxy' ? 'sk-... (master or virtual) or leave empty' :
+                              activeProviderId === 'openrouter' ? 'sk-or-...' :
+                              'API key'
+                            }
+                            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowProviderKey(!showProviderKey)}
+                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                          >
+                            {showProviderKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {!keyField && !baseField && (
+                      <p className="text-xs text-gray-500">
+                        This provider doesn&apos;t require any extra credentials in this app.
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               {config.openai_model && availableModels.length > 0 && !availableModels.includes(config.openai_model) && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
-                  Current model may not be available for this key. Select a model below and save.
+                  Current model may not be available for this provider. Select a model below and save.
                 </div>
               )}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">
-                    OpenAI Model
+                    Model
                   </label>
                   <select
                     value={config.openai_model}
@@ -769,12 +881,12 @@ const AdminConsole: React.FC = () => {
                   >
                     {config.openai_model && !availableModels.includes(config.openai_model) && (
                       <option key={config.openai_model} value={config.openai_model}>
-                        {config.openai_model.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())} (not available)
+                        {config.openai_model} (not available)
                       </option>
                     )}
                     {availableModels.map((model) => (
                       <option key={model} value={model}>
-                        {model.replace(/-/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        {model}
                       </option>
                     ))}
                   </select>
@@ -1173,112 +1285,9 @@ const AdminConsole: React.FC = () => {
                   )}
                 </div>
                 
-                {(() => {
-                  const activeProviderId = config.llm_provider || (config.use_litellm ? 'litellm_proxy' : 'openai');
-                  const activeProvider = providers.find((p) => p.id === activeProviderId);
-                  const keyField = activeProvider?.key_field as keyof AppConfig | null | undefined;
-                  const baseField = activeProvider?.base_url_field as keyof AppConfig | null | undefined;
-                  const keyValue = keyField ? ((config as any)[keyField] as string | undefined) : undefined;
-                  const baseValue = baseField ? ((config as any)[baseField] as string | undefined) : undefined;
-                  return (
-                    <>
-                      <div className="mb-4">
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          LLM Provider
-                        </label>
-                        <select
-                          value={activeProviderId}
-                          onChange={(e) => handleConfigUpdate({ llm_provider: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        >
-                          {providers.length === 0 ? (
-                            <option value={activeProviderId}>{activeProviderId}</option>
-                          ) : (
-                            providers.map((p) => (
-                              <option key={p.id} value={p.id}>{p.display_name}</option>
-                            ))
-                          )}
-                        </select>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Each provider stores its own key, so switching back and forth doesn&apos;t require re-entering credentials.
-                        </p>
-                      </div>
-
-                      {baseField && (
-                        <div className="mb-4">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            {activeProviderId === 'ollama' ? 'Ollama base URL' : 'LiteLLM base URL'}
-                          </label>
-                          <input
-                            type="text"
-                            value={baseValue || activeProvider?.default_base_url || ''}
-                            onChange={(e) => handleConfigUpdate({ [baseField]: e.target.value } as any)}
-                            placeholder={activeProvider?.default_base_url || ''}
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                        </div>
-                      )}
-
-                      {activeProviderId === 'portkey' && (
-                        <div className="mb-4">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            Portkey virtual key (optional)
-                          </label>
-                          <input
-                            type="text"
-                            value={config.portkey_virtual_key || ''}
-                            onChange={(e) => handleConfigUpdate({ portkey_virtual_key: e.target.value })}
-                            placeholder="vk-..."
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                          <p className="text-xs text-gray-500 mt-1">
-                            Portkey&apos;s virtual key abstracts the upstream provider (OpenAI/Anthropic/etc.). Leave empty if your Portkey config routes by other means.
-                          </p>
-                        </div>
-                      )}
-
-                      {keyField && (
-                        <div className="mb-4">
-                          <label className="block text-sm font-medium text-gray-700 mb-2">
-                            {activeProvider?.display_name} API key
-                            {!activeProvider?.needs_key && (
-                              <span className="ml-2 text-xs text-gray-500">(optional)</span>
-                            )}
-                          </label>
-                          <div className="relative">
-                            <input
-                              type={showProviderKey ? 'text' : 'password'}
-                              value={keyValue || ''}
-                              onChange={(e) => handleConfigUpdate({ [keyField]: e.target.value } as any)}
-                              placeholder={
-                                activeProviderId === 'openai' ? 'sk-...' :
-                                activeProviderId === 'anthropic' ? 'sk-ant-...' :
-                                activeProviderId === 'google' ? 'AIza...' :
-                                activeProviderId === 'litellm_proxy' ? 'sk-... (master or virtual) or leave empty' :
-                                'API key'
-                              }
-                              className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => setShowProviderKey(!showProviderKey)}
-                              className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                            >
-                              {showProviderKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {!keyField && !baseField && (
-                        <p className="text-xs text-gray-500 mb-4">
-                          This provider doesn&apos;t require any extra credentials in this app.
-                        </p>
-                      )}
-                    </>
-                  );
-                })()}
-
+                <p className="text-xs text-gray-500 italic">
+                  LLM provider, API key, and base URL moved to the <strong>LLM</strong> tab so they sit next to the model picker. This tab now covers guardrails and webhooks only.
+                </p>
                 {config.llm_provider === 'litellm_proxy' && config.lakera_enabled && (
                   <div className="space-y-3">
                     <p className="text-xs text-gray-600">

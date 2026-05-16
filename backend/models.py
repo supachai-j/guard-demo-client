@@ -36,6 +36,7 @@ class AppConfig(Base):
     mistral_api_key = Column(String, nullable=True)
     groq_api_key = Column(String, nullable=True)
     together_api_key = Column(String, nullable=True)
+    openrouter_api_key = Column(String, nullable=True)
     ollama_base_url = Column(String, nullable=True)
     # Guardrail names selected by app when using LiteLLM-native Lakera guardrails.
     litellm_guardrail_name = Column(String, nullable=True)

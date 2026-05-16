@@ -8,14 +8,14 @@ import zipfile
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import audit, auth as _auth, costs as cost_module, lakera, llm_client, rag, webhooks
+from . import audit, audit_stream, auth as _auth, costs as cost_module, lakera, llm_client, rag, webhooks
 from .agent import AgentRequest, run_agent
 from .database import engine, get_db
 from .models import (
@@ -183,6 +183,19 @@ def _migrate_app_config_multi_provider():
 _migrate_app_config_multi_provider()
 
 
+def _migrate_app_config_openrouter():
+    """Add openrouter_api_key column for existing DBs."""
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(app_config)"))
+        columns = [row[1] for row in r.fetchall()]
+        if "openrouter_api_key" not in columns:
+            conn.execute(text("ALTER TABLE app_config ADD COLUMN openrouter_api_key VARCHAR"))
+            conn.commit()
+
+
+_migrate_app_config_openrouter()
+
+
 def _migrate_app_config_guardrail_provider():
     """Add multi-guardrail-provider columns + backfill default to 'lakera'."""
     new_columns = {
@@ -345,7 +358,7 @@ async def logout(user: str = Depends(_auth.require_admin)):
 # Fields that must be hidden from non-admin callers (every credential).
 _SECRET_CONFIG_FIELDS = (
     "openai_api_key", "anthropic_api_key", "google_api_key", "mistral_api_key",
-    "groq_api_key", "together_api_key",
+    "groq_api_key", "together_api_key", "openrouter_api_key",
     "lakera_api_key", "litellm_virtual_key",
     "bedrock_access_key_id", "bedrock_secret_access_key",
     "azure_content_safety_key",
@@ -2321,6 +2334,49 @@ async def clear_audit_log(db: Session = Depends(get_db)):
     deleted = db.query(AuditLog).delete()
     db.commit()
     return {"deleted": deleted}
+
+
+@app.get("/api/audit/stream")
+async def audit_stream_endpoint(
+    token: Optional[str] = Query(None, description="JWT (EventSource can't set headers)"),
+    flagged_only: bool = Query(True, description="Default: only flagged events. Set false for all turns."),
+):
+    """Server-Sent Events feed of audit rows as they're written.
+
+    The browser EventSource API can't attach an Authorization header, so we
+    accept the JWT as a `?token=` query parameter and validate it manually.
+    """
+    import asyncio
+
+    _auth.verify_token(token)
+    q = audit_stream.subscribe()
+
+    async def gen():
+        try:
+            # Initial handshake so the client knows it's connected.
+            yield f"event: hello\ndata: {json.dumps({'subscribers': audit_stream.subscriber_count()})}\n\n"
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=15.0)
+                except asyncio.TimeoutError:
+                    # Keep-alive comment so proxies don't reap idle connections.
+                    yield ": keep-alive\n\n"
+                    continue
+                if flagged_only and not event.get("guardrail_flagged"):
+                    continue
+                yield f"event: audit\ndata: {json.dumps(event)}\n\n"
+        finally:
+            audit_stream.unsubscribe(q)
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 # Conversation (multi-turn memory) endpoints

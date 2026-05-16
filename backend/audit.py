@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
+from . import audit_stream
 from .models import AuditLog
 
 
@@ -60,6 +61,10 @@ def record_chat_turn(
         db.add(row)
         db.commit()
         db.refresh(row)
+        try:
+            audit_stream.publish(_row_to_dict(row))
+        except Exception as pub_err:
+            print(f"⚠️ audit_stream.publish failed: {pub_err}")
         return row.id
     except Exception as e:
         print(f"⚠️ audit.record_chat_turn failed: {e}")

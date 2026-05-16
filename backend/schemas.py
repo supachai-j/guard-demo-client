@@ -40,6 +40,7 @@ class AppConfigResponse(AppConfigBase):
     mistral_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     together_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
     # Multi-guardrail fields
     guardrail_provider: Optional[str] = None
@@ -79,6 +80,7 @@ class AppConfigUpdate(AppConfigBase):
     mistral_api_key: Optional[str] = None
     groq_api_key: Optional[str] = None
     together_api_key: Optional[str] = None
+    openrouter_api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
     # Multi-guardrail fields
     guardrail_provider: Optional[str] = None

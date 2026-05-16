@@ -157,6 +157,30 @@ def require_admin(authorization: Optional[str] = Header(None)) -> str:
     return user
 
 
+def verify_token(token: Optional[str]) -> str:
+    """Validate a raw JWT (no `Bearer ` prefix). Returns username or 401s.
+
+    Used by endpoints that can't read the Authorization header — e.g. SSE
+    streams consumed via the browser EventSource API, which has no way to
+    set custom headers and so authenticates via `?token=` query param.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin authentication required.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    claims = _decode_token(token)
+    user = claims.get("sub")
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing subject.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return user
+
+
 def current_user(authorization: Optional[str] = Header(None)) -> Optional[str]:
     """Like require_admin but doesn't 401 — returns None when no/invalid
     token. Used by endpoints that vary their response by auth state

@@ -437,6 +437,18 @@ class ApiService {
     return this.request('/auth/status');
   }
 
+  /** URL for the live audit stream (consumed via EventSource).
+   *  EventSource can't set Authorization headers, so we pass the JWT as a
+   *  query param — the backend validates it the same way require_admin does. */
+  auditStreamUrl(opts?: { flaggedOnly?: boolean }): string | null {
+    const token = getToken();
+    if (!token) return null;
+    const params = new URLSearchParams();
+    params.set('token', token);
+    params.set('flagged_only', opts?.flaggedOnly === false ? 'false' : 'true');
+    return `${API_BASE}/audit/stream?${params.toString()}`;
+  }
+
   // Streaming chat — returns an async iterator of token strings.
   async *streamChat(message: string, conversationId?: number, sessionId?: string): AsyncGenerator<{ kind: 'chunk' | 'done' | 'blocked' | 'error'; data: any }> {
     const token = getToken();

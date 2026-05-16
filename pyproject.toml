@@ -32,3 +32,13 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
+
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+asyncio_mode = "auto"
+filterwarnings = [
+    # LiteLLM + Pydantic v2 deprecation noise drowns out real failures
+    "ignore::DeprecationWarning",
+]

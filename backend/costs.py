@@ -25,11 +25,13 @@ PRICING: Dict[str, Dict[str, Tuple[float, float]]] = {
         "gpt-3.5-turbo":  (0.50,   1.50),
     },
     "anthropic": {
-        "claude-3-5-sonnet-20241022": (3.00, 15.00),
-        "claude-3-5-haiku-20241022":  (0.80,  4.00),
-        "claude-3-opus-20240229":     (15.00, 75.00),
-        "claude-3-sonnet-20240229":   (3.00, 15.00),
-        "claude-3-haiku-20240307":    (0.25,  1.25),
+        # Claude 4.x family (current). Old 3.x snapshots removed because
+        # Anthropic returns 404 for them in early 2026.
+        # Prices are approximate USD per 1M tokens — update from the official
+        # pricing page when shipping a release.
+        "claude-opus-4-7":             (15.00, 75.00),
+        "claude-sonnet-4-6":           (3.00,  15.00),
+        "claude-haiku-4-5-20251001":   (0.80,   4.00),
     },
     "google": {
         "gemini-2.0-flash-exp":  (0.00,  0.00),  # experimental, free tier
@@ -60,6 +62,7 @@ PRICING: Dict[str, Dict[str, Tuple[float, float]]] = {
     "ollama": {},          # local, $0
     "litellm_proxy": {},   # depends on what the proxy routes to; left to the proxy to report
     "portkey": {},         # depends on virtual key routing
+    "openrouter": {},      # depends on routed upstream model — OpenRouter bills per-token at its own table
 }
 
 
@@ -83,8 +86,8 @@ def estimate_cost_usd(
     0.0 so the UI can show "$0.00" instead of "unknown"."""
     if provider in {"ollama"}:
         return 0.0
-    if provider in {"litellm_proxy", "portkey"} and not (model in (PRICING.get(provider) or {})):
-        # We don't know what the proxy routes to; mark as unknown.
+    if provider in {"litellm_proxy", "portkey", "openrouter"} and not (model in (PRICING.get(provider) or {})):
+        # We don't know what the gateway routes to; mark as unknown.
         return None
     price = get_price(provider or "", model or "")
     if not price:
@@ -100,6 +103,9 @@ def extract_token_usage(response_dict: Dict[str, Any]) -> Tuple[int, int]:
         { "usage": { "prompt_tokens": int, "completion_tokens": int, ... } }
     Returns (0, 0) when usage is missing — never raises."""
     usage = (response_dict or {}).get("usage") or {}
+    if not isinstance(usage, dict):
+        # Some upstream errors return usage as a string/None; we promise to never raise.
+        return 0, 0
     inp = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
     out = usage.get("completion_tokens") or usage.get("output_tokens") or 0
     try:
