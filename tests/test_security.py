@@ -13,7 +13,7 @@ the code:
 
 from __future__ import annotations
 
-from backend.main import _SECRET_CONFIG_FIELDS
+from backend.config_redaction import SECRET_CONFIG_FIELDS as _SECRET_CONFIG_FIELDS
 from backend.models import AppConfig
 from sqlalchemy import inspect
 

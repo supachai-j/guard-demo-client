@@ -359,36 +359,10 @@ async def logout(user: str = Depends(_auth.require_admin)):
     return {"logged_out": True, "user": user}
 
 
-# Fields that must be hidden from non-admin callers (every credential).
-_SECRET_CONFIG_FIELDS = (
-    "openai_api_key", "anthropic_api_key", "google_api_key", "mistral_api_key",
-    "groq_api_key", "together_api_key", "openrouter_api_key",
-    "lakera_api_key", "litellm_virtual_key",
-    "bedrock_access_key_id", "bedrock_secret_access_key",
-    "azure_content_safety_key",
-    "palo_alto_api_key",
-    "portkey_api_key", "portkey_virtual_key",
-    "cloudflare_api_token",
-)
-
-
-def _config_response(config: AppConfig, *, authenticated: bool) -> AppConfig:
-    """Return a config view with secrets blanked for non-admins.
-
-    The Landing page reads /api/config for branding fields; we don't want
-    those visitors to see API keys. The AdminConsole sends a Bearer token
-    so it gets the unredacted config."""
-    if authenticated:
-        return config
-    # Build a shallow copy that pydantic can serialise; we just blank the
-    # secret fields in-place but on a *detached* attribute dict so the DB
-    # row isn't mutated.
-    from copy import copy as _copy
-    safe = _copy(config)
-    for field in _SECRET_CONFIG_FIELDS:
-        if hasattr(safe, field) and getattr(safe, field, None):
-            setattr(safe, field, "***")
-    return safe
+# Re-export from the tiny config_redaction module so tests can import the
+# mask list without loading the full FastAPI app (which pulls in chromadb +
+# numpy, occasionally CPU-incompatible on CI).
+from .config_redaction import redact_config as _config_response  # noqa: E402, F401
 
 
 # App Config endpoints
