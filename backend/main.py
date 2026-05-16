@@ -759,6 +759,62 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     )
 
 
+class _ConfigOverride:
+    """Read-through wrapper around AppConfig that overrides selected fields
+    without touching the underlying SQLAlchemy row. Used by /api/chat/compare
+    so we can run the agent twice with different `lakera_enabled` values
+    without persisting either change."""
+
+    def __init__(self, base, **overrides):
+        object.__setattr__(self, "_base", base)
+        object.__setattr__(self, "_overrides", overrides)
+
+    def __getattr__(self, name):
+        overrides = object.__getattribute__(self, "_overrides")
+        if name in overrides:
+            return overrides[name]
+        return getattr(object.__getattribute__(self, "_base"), name)
+
+
+@app.post("/api/chat/compare")
+async def chat_compare(request: ChatRequest, db: Session = Depends(get_db)):
+    """Run the same prompt twice — once with Lakera Guard on, once off — and
+    return both results side-by-side. Used by the Landing-page comparison
+    modal to demo the value of guardrails in a single screen."""
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    if not config.lakera_api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Comparison requires a Lakera API key. Set it in Admin → Security.",
+        )
+
+    _ensure_active_model_valid(config, db)
+    agent_request = AgentRequest(message=request.message, session_id=request.session_id)
+
+    cfg_with = _ConfigOverride(config, lakera_enabled=True)
+    cfg_without = _ConfigOverride(config, lakera_enabled=False)
+
+    result_with = await run_agent(agent_request, cfg_with, db)
+    result_without = await run_agent(agent_request, cfg_without, db)
+
+    return {
+        "with_guard": {
+            "response": result_with.response,
+            "lakera": result_with.lakera_status,
+            "tool_traces": result_with.tool_traces,
+            "citations": result_with.citations,
+        },
+        "without_guard": {
+            "response": result_without.response,
+            "lakera": None,
+            "tool_traces": result_without.tool_traces,
+            "citations": result_without.citations,
+        },
+    }
+
+
 # RAG endpoints
 @app.post("/api/rag/generate", response_model=RagGenerateResponse)
 async def generate_rag_content(request: RagGenerateRequest, db: Session = Depends(get_db)):

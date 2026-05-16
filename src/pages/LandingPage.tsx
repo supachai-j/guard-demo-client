@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Settings, Shield } from 'lucide-react';
+import { Settings, Shield, GitCompare } from 'lucide-react';
 import ChatWidget from '../components/ChatWidget';
 import LakeraOverlay from '../components/LakeraOverlay';
 import ScenarioSwitcher from '../components/ScenarioSwitcher';
+import CompareDialog from '../components/CompareDialog';
 import { AppConfig } from '../types';
 import { apiService } from '../services/api';
 
@@ -12,6 +13,7 @@ const LandingPage: React.FC = () => {
   const [isLakeraOverlayOpen, setIsLakeraOverlayOpen] = useState(false);
   const [isLakeraEnabled, setIsLakeraEnabled] = useState(false);
   const [isChatExpanded, setIsChatExpanded] = useState(false);
+  const [isCompareOpen, setIsCompareOpen] = useState(false);
 
   useEffect(() => {
     loadConfig();
@@ -116,13 +118,21 @@ const LandingPage: React.FC = () => {
             </p>
             
             <div className="flex flex-col sm:flex-row gap-4 justify-end">
-              <button 
+              <button
                 onClick={handleOpenChat}
                 className="bg-primary-600 text-white px-6 py-3 rounded-lg hover:bg-primary-700 transition-colors font-medium"
               >
                 Get Started
               </button>
-              <button 
+              <button
+                onClick={() => setIsCompareOpen(true)}
+                className="flex items-center justify-center gap-2 border border-primary-600 text-primary-700 px-6 py-3 rounded-lg hover:bg-primary-50 transition-colors font-medium"
+                title="Run the same prompt with and without Lakera Guard, side by side"
+              >
+                <GitCompare className="w-4 h-4" />
+                Compare with/without Guard
+              </button>
+              <button
                 onClick={handleOpenChat}
                 className="border border-gray-300 text-gray-700 px-6 py-3 rounded-lg hover:bg-gray-50 transition-colors font-medium"
               >
@@ -197,9 +207,15 @@ const LandingPage: React.FC = () => {
       />
 
       {/* Lakera Overlay */}
-      <LakeraOverlay 
-        isOpen={isLakeraOverlayOpen} 
-        onClose={() => setIsLakeraOverlayOpen(false)} 
+      <LakeraOverlay
+        isOpen={isLakeraOverlayOpen}
+        onClose={() => setIsLakeraOverlayOpen(false)}
+      />
+
+      {/* Side-by-side compare modal */}
+      <CompareDialog
+        isOpen={isCompareOpen}
+        onClose={() => setIsCompareOpen(false)}
       />
     </div>
   );
