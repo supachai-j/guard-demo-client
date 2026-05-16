@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Agentic Demo</title>
+    <script>
+      // FOUC-prevention: set the theme class on <html> before React paints.
+      (function () {
+        try {
+          var stored = localStorage.getItem('color-mode');
+          var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          var mode = stored || (prefersDark ? 'dark' : 'light');
+          if (mode === 'dark') document.documentElement.classList.add('dark');
+          document.documentElement.dataset.colorMode = mode;
+        } catch (e) { /* localStorage blocked — fall back to light */ }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

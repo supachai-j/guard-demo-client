@@ -4,7 +4,7 @@ import AdminConsole from './pages/AdminConsole'
 
 function App() {
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-900">
       <Routes>
         <Route path="/" element={<LandingPage />} />
         <Route path="/admin" element={<AdminConsole />} />

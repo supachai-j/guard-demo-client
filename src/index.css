@@ -68,10 +68,18 @@ body {
   min-width: 320px;
   min-height: 100vh;
   font-family: var(--font-body);
+  /* Smooth transition when toggling dark/light */
+  transition: background-color 0.18s ease, color 0.18s ease;
 }
 
 #root {
   width: 100%;
   min-height: 100vh;
+}
+
+/* Dark-mode default body background so pages without an explicit bg don't flash white */
+html.dark body {
+  background-color: rgb(15 23 42); /* slate-900 */
+  color: rgb(226 232 240);          /* slate-200 */
 }
 

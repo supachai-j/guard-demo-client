@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Loader2, MessageCircle, Minimize2 } from 'lucide-react';
 import { ChatMessage, LakeraResult, AppConfig, DemoPromptSuggestion } from '../types';
 import { apiService } from '../services/api';
+import { useUI } from '../i18n/UIContext';
 
 interface ChatWidgetProps {
   onLakeraToggle?: (enabled: boolean) => void;
@@ -11,6 +12,7 @@ interface ChatWidgetProps {
 }
 
 const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, onExpandedChange, config }) => {
+  const { t } = useUI();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -208,7 +210,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Bot className="w-5 h-5" />
-                <span className="font-semibold">AI Assistant</span>
+                <span className="font-semibold">{t('chatTitle')}</span>
               </div>
               <div className="flex items-center space-x-2">
                 <button
@@ -283,7 +285,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
                 <div className="bg-gray-100 text-gray-800 px-4 py-2 rounded-lg">
                   <div className="flex items-center space-x-2">
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    <span className="text-sm">Thinking...</span>
+                    <span className="text-sm">{t('thinking')}</span>
                   </div>
                 </div>
               </div>
@@ -302,7 +304,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
                     value={inputMessage}
                     onChange={handleInputChange}
                     onKeyDown={handleKeyPress}
-                    placeholder="Type your message..."
+                    placeholder={t('chatPlaceholder')}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent resize-none max-h-24 overflow-y-auto"
                     disabled={isLoading}
                     autoFocus
