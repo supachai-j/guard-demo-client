@@ -2,7 +2,6 @@
 
 from backend.scenarios import SCENARIOS, get_scenario
 
-
 EXPECTED_IDS = {"credflow", "nimbusvault", "safeharbor", "vitalis"}
 
 

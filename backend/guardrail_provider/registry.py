@@ -15,7 +15,6 @@ from .lakera_provider import LakeraProvider
 from .openai_moderation_provider import OpenAIModerationProvider
 from .palo_alto_provider import PaloAltoAirsProvider
 
-
 GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
     LakeraProvider.id: LakeraProvider(),
     OpenAIModerationProvider.id: OpenAIModerationProvider(),

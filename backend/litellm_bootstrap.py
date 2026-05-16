@@ -9,7 +9,6 @@ from urllib.parse import urlparse
 
 import httpx
 
-
 DEFAULT_LITELLM_URL = "http://localhost:4000"
 DEFAULT_CONFIG_PATH = "litellm/config.yaml"
 DEFAULT_LITELLM_IMAGE = "litellm/litellm-database:v1.82.3"

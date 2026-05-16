@@ -10,7 +10,6 @@ added in main.py, so URLs here use the /static/fakecompanies/... prefix.
 
 from typing import Any, Dict, List
 
-
 SCENARIOS: List[Dict[str, Any]] = [
     {
         "id": "credflow",

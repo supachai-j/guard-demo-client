@@ -25,7 +25,6 @@ from .providers import (
     to_litellm_model,
 )
 
-
 # Timeout for LiteLLM proxy /v1/models request (seconds)
 LITELLM_MODELS_TIMEOUT = 10.0
 

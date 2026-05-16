@@ -6,7 +6,7 @@ import shutil
 import sys
 import zipfile
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,9 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import audit, audit_stream, auth as _auth, costs as cost_module, lakera, llm_client, rag, webhooks
+from . import audit, audit_stream, lakera, llm_client, rag, webhooks
+from . import auth as _auth
+from . import costs as cost_module
 from .agent import AgentRequest, run_agent
 from .database import engine, get_db
+from .guardrail_provider import list_providers_for_ui as list_guardrail_providers_for_ui
 from .models import (
     AppConfig,
     AuditLog,
@@ -31,7 +34,6 @@ from .models import (
     SessionRecording,
     Tool,
 )
-from .guardrail_provider import list_providers_for_ui as list_guardrail_providers_for_ui
 from .providers import list_providers_for_ui
 from .scenarios import SCENARIOS, get_scenario
 from .schemas import (
@@ -53,7 +55,6 @@ from .schemas import (
 )
 from .toolhive import (
     discover_mcp_tool_capabilities_sync,
-    enabled_tools,
     store_capabilities,
 )
 
@@ -1753,7 +1754,7 @@ async def replay_recording(recording_id: int, db: Session = Depends(get_db)):
 
 
 # Playbook endpoints — predefined attack suites (OWASP LLM Top 10 etc.)
-from . import playbooks as _playbooks
+from . import playbooks as _playbooks  # noqa: E402 — kept here to colocate with route handlers
 
 
 def _slugify(name: str) -> str:
@@ -2020,9 +2021,9 @@ async def audit_report_pdf(limit: int = 200, db: Session = Depends(get_db)):
     """Render the last N audit entries as a 1-2 page PDF summary."""
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import cm
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
     entries = audit.list_entries(db, limit=min(max(limit, 1), 500))
     total = len(entries)
@@ -2267,7 +2268,6 @@ async def compare_llms(payload: dict, db: Session = Depends(get_db)):
     Body: { message: str, providers: [{provider, model}], session_id?: str }
     """
     import asyncio as _aio
-    import copy
     import time as _t
 
     from .providers import PROVIDERS

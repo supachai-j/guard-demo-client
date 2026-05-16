@@ -8,7 +8,6 @@ These integrity tests guard against the easy regressions:
 
 from backend.playbooks import PLAYBOOKS, get_playbook, is_builtin, list_playbooks
 
-
 # ---------- catalog --------------------------------------------------------
 
 def test_at_least_two_playbooks_shipped():

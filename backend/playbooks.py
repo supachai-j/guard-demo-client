@@ -19,7 +19,6 @@ Source: https://owasp.org/www-project-top-10-for-large-language-model-applicatio
 
 from typing import Dict, List
 
-
 PLAYBOOKS: Dict[str, Dict] = {
     "owasp_llm_top10_2025": {
         "id": "owasp_llm_top10_2025",

@@ -18,13 +18,11 @@ If `cloudflare_gateway_id` is configured we route through the gateway
 the user's AI Gateway analytics; otherwise we hit the direct Workers AI URL.
 """
 
-import json
 from typing import Any, Dict, List, Optional
 
 import httpx
 
 from .base import GuardrailProvider, GuardrailStatus
-
 
 # MLCommons hazard taxonomy used by Llama Guard 3.
 _LLAMA_GUARD_CATEGORIES: Dict[str, str] = {

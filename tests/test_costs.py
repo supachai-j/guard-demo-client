@@ -9,7 +9,6 @@ from backend.costs import (
     get_price,
 )
 
-
 # ---------- get_price ----------------------------------------------------
 
 def test_get_price_returns_tuple_for_known_model():

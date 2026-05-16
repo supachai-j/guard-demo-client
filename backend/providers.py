@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional
 
 from .models import AppConfig
 
-
 # Provider id -> metadata. The id is what we store in AppConfig.llm_provider.
 PROVIDERS: Dict[str, Dict[str, Any]] = {
     "openai": {

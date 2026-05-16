@@ -105,7 +105,7 @@ def _decode_token(token: str) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid or expired token: {e}",
             headers={"WWW-Authenticate": "Bearer"},
-        )
+        ) from e
 
 
 def _extract_bearer(authorization: Optional[str]) -> Optional[str]:

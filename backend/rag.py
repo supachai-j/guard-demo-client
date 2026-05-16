@@ -11,8 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import chromadb
 from chromadb.config import Settings
 
-from .database import get_db
 from . import llm_client
+from .database import get_db
 from .lakera import check_interaction
 from .models import AppConfig, RagSource
 

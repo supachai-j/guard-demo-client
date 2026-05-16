@@ -9,7 +9,6 @@ These tests assert the contract the live attack feed depends on:
 import asyncio
 
 import pytest
-
 from backend import audit_stream
 
 

@@ -2,7 +2,6 @@
 
 from types import SimpleNamespace
 
-from backend import providers as providers_mod
 from backend.providers import (
     PROVIDERS,
     credentials_configured,
@@ -18,14 +17,7 @@ from backend.providers import (
 
 def _cfg(**fields):
     """Build a lightweight stand-in for AppConfig without touching the ORM."""
-    defaults = {k: None for k in (
-        "llm_provider", "use_litellm",
-        "openai_api_key", "anthropic_api_key", "google_api_key",
-        "mistral_api_key", "groq_api_key", "together_api_key",
-        "openrouter_api_key", "litellm_virtual_key",
-        "portkey_api_key", "portkey_base_url",
-        "ollama_base_url", "litellm_base_url",
-    )}
+    defaults = dict.fromkeys(("llm_provider", "use_litellm", "openai_api_key", "anthropic_api_key", "google_api_key", "mistral_api_key", "groq_api_key", "together_api_key", "openrouter_api_key", "litellm_virtual_key", "portkey_api_key", "portkey_base_url", "ollama_base_url", "litellm_base_url"))
     defaults.update(fields)
     return SimpleNamespace(**defaults)
 

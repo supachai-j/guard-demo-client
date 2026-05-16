@@ -3,10 +3,8 @@
 from datetime import datetime, timedelta
 
 import pytest
-from fastapi import HTTPException
-
 from backend import auth as auth_mod
-
+from fastapi import HTTPException
 
 # ---------- _issue_token / _decode_token ----------------------------------
 

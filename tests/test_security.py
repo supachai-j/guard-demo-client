@@ -13,11 +13,9 @@ the code:
 
 from __future__ import annotations
 
-from sqlalchemy import inspect
-
 from backend.main import _SECRET_CONFIG_FIELDS
 from backend.models import AppConfig
-
+from sqlalchemy import inspect
 
 # Substrings that indicate a column likely holds a credential. Anything in
 # AppConfig matching one of these MUST appear in _SECRET_CONFIG_FIELDS so
