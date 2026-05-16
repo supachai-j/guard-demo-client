@@ -75,10 +75,9 @@ jobs:
   python-deps:
     name: Python dependency audit (pip-audit)
     runs-on: ubuntu-latest
-    # Soft-gate while Dependabot burns down the existing findings. The job
-    # still runs and surfaces CVEs in the PR check list, but doesn't block.
-    # Promote to hard-gate once requirements.txt is on a clean baseline.
-    continue-on-error: true
+    # Hard-gated: requirements.txt is on a CVE-clean baseline as of
+    # 2026-05-16. New findings should block the PR so Dependabot has a
+    # chance to fix them before they reach main.
     steps:
       - uses: actions/checkout@v4
       - uses: pypa/gh-action-pip-audit@v1.0.8

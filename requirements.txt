@@ -1,20 +1,26 @@
-fastapi==0.104.1
+fastapi==0.125.0
 uvicorn[standard]==0.24.0
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
+# Pin starlette explicitly so fastapi's loose dep gets a CVE-clean version.
+# CVE-2024-47874, CVE-2025-54121 fixed in 0.47.2; CVE-2025-62727 fixed in 0.49.1.
+starlette==0.49.1
+python-multipart==0.0.28
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 sqlalchemy==2.0.23
 chromadb==0.4.18
 openai>=1.40.0
-litellm>=1.50.0
-pydantic==2.5.0
-pydantic-settings==2.1.0
-python-dotenv==1.0.0
+# litellm 1.84.0+ relaxes its strict python-dotenv / pydantic pins,
+# letting us pull in the CVE-clean versions of both.
+litellm>=1.84.0
+# pydantic 2.10+ required by recent litellm; pydantic-settings bumped to match.
+pydantic>=2.10.0,<3.0.0
+pydantic-settings>=2.5.0,<3.0.0
+python-dotenv==1.2.2
 aiofiles==23.2.1
 pypdf2==3.0.1
-markdown==3.5.1
+markdown==3.8.1
 pandas==2.1.4
-requests==2.31.0
-httpx==0.25.2
+requests==2.34.2
+httpx==0.28.1
 boto3
 reportlab>=4.0
