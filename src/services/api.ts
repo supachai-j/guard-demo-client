@@ -245,6 +245,113 @@ class ApiService {
       method: 'POST',
     });
   }
+
+  // Audit log
+  async getAuditLog(opts?: { limit?: number; flagged_only?: boolean }): Promise<{ entries: any[]; count: number }> {
+    const params = new URLSearchParams();
+    if (opts?.limit) params.set('limit', String(opts.limit));
+    if (opts?.flagged_only) params.set('flagged_only', 'true');
+    return this.request(`/audit?${params.toString()}`);
+  }
+
+  exportAuditCsvUrl(): string {
+    return `${API_BASE}/audit?format=csv&limit=1000`;
+  }
+
+  async clearAuditLog(): Promise<{ deleted: number }> {
+    return this.request('/audit', { method: 'DELETE' });
+  }
+
+  // Conversation history (multi-turn memory)
+  async listConversations(): Promise<{ conversations: any[] }> {
+    return this.request('/conversations');
+  }
+
+  async getConversation(id: number): Promise<{ id: number; title: string; messages: any[] }> {
+    return this.request(`/conversations/${id}`);
+  }
+
+  async deleteConversation(id: number): Promise<{ deleted: number }> {
+    return this.request(`/conversations/${id}`, { method: 'DELETE' });
+  }
+
+  // Guardrail compare
+  async compareGuardrails(message: string): Promise<{ message: string; results: any[] }> {
+    return this.request('/chat/compare-guardrails', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    });
+  }
+
+  // Image moderation
+  async moderateImage(imageDataUrl: string): Promise<{ supported: boolean; provider: string; status: any }> {
+    return this.request('/moderation/image', {
+      method: 'POST',
+      body: JSON.stringify({ image_data_url: imageDataUrl }),
+    });
+  }
+
+  // OWASP / playbooks
+  async listPlaybooks(): Promise<{ playbooks: { id: string; name: string; docs_url?: string; count: number }[] }> {
+    return this.request('/playbooks');
+  }
+
+  async runPlaybook(id: string): Promise<any> {
+    return this.request(`/playbooks/${id}/run`, { method: 'POST' });
+  }
+
+  // Recordings
+  async listRecordings(): Promise<{ recordings: any[] }> {
+    return this.request('/recordings');
+  }
+
+  async createRecording(name: string, events: any[], notes?: string): Promise<{ id: number }> {
+    return this.request('/recordings', {
+      method: 'POST',
+      body: JSON.stringify({ name, events, notes }),
+    });
+  }
+
+  async replayRecording(id: number): Promise<{ results: any[] }> {
+    return this.request(`/recordings/${id}/replay`, { method: 'POST' });
+  }
+
+  async deleteRecording(id: number): Promise<{ deleted: number }> {
+    return this.request(`/recordings/${id}`, { method: 'DELETE' });
+  }
+
+  // Streaming chat — returns an async iterator of token strings.
+  async *streamChat(message: string, conversationId?: number, sessionId?: string): AsyncGenerator<{ kind: 'chunk' | 'done' | 'blocked' | 'error'; data: any }> {
+    const resp = await fetch(`${API_BASE}/chat/stream`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, conversation_id: conversationId, session_id: sessionId }),
+    });
+    if (!resp.body) throw new Error('No streaming response body');
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buffer.indexOf('\n\n')) >= 0) {
+        const raw = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 2);
+        const lines = raw.split('\n');
+        let event = 'message';
+        let data = '';
+        for (const line of lines) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) data += line.slice(5).trim();
+        }
+        let parsed: any = null;
+        try { parsed = data ? JSON.parse(data) : null; } catch { /* ignore */ }
+        yield { kind: event as any, data: parsed };
+      }
+    }
+  }
 }
 
 export const apiService = new ApiService();

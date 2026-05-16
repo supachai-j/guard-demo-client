@@ -127,7 +127,8 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
     "portkey": {
         "display_name": "Portkey (AI Gateway)",
         "key_field": "portkey_api_key",
-        "base_url_field": None,
+        # Optional self-managed deployment URL (otherwise hits api.portkey.ai).
+        "base_url_field": "portkey_base_url",
         "default_base_url": "https://api.portkey.ai/v1",
         # Portkey is OpenAI-compatible; model name is whatever the virtual key resolves to.
         "litellm_prefix": "",

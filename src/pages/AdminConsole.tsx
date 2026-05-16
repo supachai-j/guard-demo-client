@@ -9,9 +9,10 @@ import GenerateContentModal from '../components/GenerateContentModal';
 import RagManagement, { RagManagementRef } from '../components/RagManagement';
 import DemoPromptManager from '../components/DemoPromptManager';
 import UIToggles from '../components/UIToggles';
+import ThreatLab from '../components/ThreatLab';
 import { useUI } from '../i18n/UIContext';
 
-type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'prompts' | 'export';
+type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'prompts' | 'threat-lab' | 'export';
 
 const AdminConsole: React.FC = () => {
   const { t } = useUI();
@@ -431,6 +432,7 @@ const AdminConsole: React.FC = () => {
     { id: 'tools', label: t('tabTools') },
     { id: 'security', label: t('tabSecurity') },
     { id: 'prompts', label: t('tabPrompts') },
+    { id: 'threat-lab', label: 'Threat Lab' },
     { id: 'export', label: t('tabExport') },
   ];
 
@@ -1382,6 +1384,17 @@ const AdminConsole: React.FC = () => {
           {activeTab === 'prompts' && (
             <div className="space-y-6">
               <DemoPromptManager />
+            </div>
+          )}
+
+          {activeTab === 'threat-lab' && (
+            <div className="space-y-6">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Threat Lab</h2>
+              <p className="text-sm text-gray-600 dark:text-slate-400">
+                Audit log, side-by-side guardrail compare, OWASP LLM Top 10 playbook runner,
+                and replayable recordings.
+              </p>
+              <ThreatLab />
             </div>
           )}
 

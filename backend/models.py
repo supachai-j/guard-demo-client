@@ -62,6 +62,11 @@ class AppConfig(Base):
     # Portkey (LLM gateway — used when llm_provider="portkey")
     portkey_api_key = Column(String, nullable=True)
     portkey_virtual_key = Column(String, nullable=True)
+    portkey_base_url = Column(String, nullable=True)
+    # Cloudflare Firewall for AI
+    cloudflare_account_id = Column(String, nullable=True)
+    cloudflare_api_token = Column(String, nullable=True)
+    cloudflare_gateway_id = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -119,3 +124,59 @@ class DemoPrompt(Base):
     usage_count = Column(Integer, default=0)  # Track popularity
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Conversation(Base):
+    """A chat thread — anchor for multi-turn history."""
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String, nullable=True)
+    session_id = Column(String, index=True, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class Message(Base):
+    """One turn inside a Conversation."""
+    __tablename__ = "messages"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, index=True)
+    role = Column(String)  # "user" | "assistant"
+    content = Column(Text)
+    flagged = Column(Boolean, default=False)
+    guardrail_status = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class AuditLog(Base):
+    """One row per chat call. Drives /api/audit export for compliance demos."""
+    __tablename__ = "audit_log"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(Integer, nullable=True, index=True)
+    session_id = Column(String, nullable=True, index=True)
+    user_message = Column(Text)
+    assistant_response = Column(Text, nullable=True)
+    llm_provider = Column(String, nullable=True)
+    llm_model = Column(String, nullable=True)
+    guardrail_provider = Column(String, nullable=True)
+    guardrail_flagged = Column(Boolean, default=False)
+    guardrail_breakdown = Column(JSON, nullable=True)
+    tool_traces = Column(JSON, nullable=True)
+    latency_ms = Column(Integer, nullable=True)
+    blocked = Column(Boolean, default=False)
+    error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+
+class SessionRecording(Base):
+    """Demo recorder — captures a sequence of user prompts for later replay."""
+    __tablename__ = "session_recordings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String)
+    notes = Column(Text, nullable=True)
+    events = Column(JSON, default=[])  # [{ts, type, prompt, response, lakera}]
+    created_at = Column(DateTime, default=datetime.utcnow)

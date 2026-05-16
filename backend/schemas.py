@@ -55,6 +55,10 @@ class AppConfigResponse(AppConfigBase):
     palo_alto_host: Optional[str] = None
     portkey_api_key: Optional[str] = None
     portkey_virtual_key: Optional[str] = None
+    portkey_base_url: Optional[str] = None
+    cloudflare_account_id: Optional[str] = None
+    cloudflare_api_token: Optional[str] = None
+    cloudflare_gateway_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -89,6 +93,10 @@ class AppConfigUpdate(AppConfigBase):
     palo_alto_host: Optional[str] = None
     portkey_api_key: Optional[str] = None
     portkey_virtual_key: Optional[str] = None
+    portkey_base_url: Optional[str] = None
+    cloudflare_account_id: Optional[str] = None
+    cloudflare_api_token: Optional[str] = None
+    cloudflare_gateway_id: Optional[str] = None
 
 
 # Chat schemas
@@ -96,6 +104,7 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     prompt_id: Optional[int] = None
+    conversation_id: Optional[int] = None
 
 
 class ChatResponse(BaseModel):
@@ -103,6 +112,7 @@ class ChatResponse(BaseModel):
     lakera: Optional[Dict[str, Any]] = None
     tool_traces: Optional[List[Dict[str, Any]]] = None
     citations: Optional[List[Dict[str, Any]]] = None
+    conversation_id: Optional[int] = None
 
 
 # RAG schemas

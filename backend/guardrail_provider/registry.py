@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from .azure_content_safety_provider import AzureContentSafetyProvider
 from .base import GuardrailProvider
 from .bedrock_provider import BedrockGuardrailsProvider
+from .cloudflare_provider import CloudflareFirewallForAIProvider
 from .lakera_provider import LakeraProvider
 from .openai_moderation_provider import OpenAIModerationProvider
 from .palo_alto_provider import PaloAltoAirsProvider
@@ -21,6 +22,7 @@ GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
     BedrockGuardrailsProvider.id: BedrockGuardrailsProvider(),
     AzureContentSafetyProvider.id: AzureContentSafetyProvider(),
     PaloAltoAirsProvider.id: PaloAltoAirsProvider(),
+    CloudflareFirewallForAIProvider.id: CloudflareFirewallForAIProvider(),
 }
 
 
@@ -91,6 +93,15 @@ _PROVIDER_UI_FIELDS: Dict[str, Dict[str, Any]] = {
         ],
         "docs_url": "https://pan.dev/prisma-airs/api/airuntimesecurity/",
         "summary": "Calls POST /v1/scan/sync/request. Detects prompt injection, DLP, URL cats, toxic content, malicious code. Requires an AI security profile preconfigured in Strata Cloud Manager.",
+    },
+    "cloudflare_firewall_ai": {
+        "fields": [
+            {"name": "cloudflare_account_id", "label": "Cloudflare Account ID", "type": "text", "placeholder": "32-char hex string"},
+            {"name": "cloudflare_api_token", "label": "Cloudflare API Token (Workers AI scope)", "type": "password", "placeholder": "your Cloudflare API token"},
+            {"name": "cloudflare_gateway_id", "label": "AI Gateway ID (optional)", "type": "text", "placeholder": "route through AI Gateway when set"},
+        ],
+        "docs_url": "https://developers.cloudflare.com/ai-gateway/firewall-for-ai/",
+        "summary": "Calls Workers AI @cf/meta/llama-guard-3-8b (MLCommons S1–S14 taxonomy). Routes through AI Gateway when a gateway ID is set.",
     },
 }
 

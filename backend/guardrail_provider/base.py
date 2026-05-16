@@ -59,3 +59,24 @@ class GuardrailProvider(ABC):
 
         Returns the normalised Lakera-shaped status, or None on transient error.
         """
+
+    #: Whether this provider can moderate images (override in subclasses).
+    supports_image: bool = False
+
+    async def check_image(
+        self,
+        image_data_url: str,
+        cfg: Any,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[GuardrailStatus]:
+        """Optional: moderate an image given as a `data:image/...;base64,...` URL.
+
+        Default implementation returns a "not supported" status so callers can
+        surface that to the UI without crashing.
+        """
+        return {
+            "flagged": False,
+            "breakdown": [],
+            "payload": [],
+            "metadata": {"source": self.id, "skipped": "image_moderation_not_supported"},
+        }

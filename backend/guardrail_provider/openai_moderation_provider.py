@@ -76,6 +76,7 @@ def _format_breakdown(categories: Dict[str, Any], message_id: int) -> List[Dict[
 class OpenAIModerationProvider(GuardrailProvider):
     id = "openai_moderation"
     display_name = "OpenAI Moderation"
+    supports_image = True
 
     @classmethod
     def is_configured(cls, cfg: Any) -> bool:
@@ -142,6 +143,49 @@ class OpenAIModerationProvider(GuardrailProvider):
                 "source": "openai_moderation",
                 "model": getattr(resp, "model", "omni-moderation-latest"),
                 "request_uuid": getattr(resp, "id", None),
+            },
+        }
+        legacy_lakera.set_last_result(status)
+        return status
+
+    async def check_image(
+        self,
+        image_data_url: str,
+        cfg: Any,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[GuardrailStatus]:
+        api_key = getattr(cfg, "openai_api_key", None)
+        if not api_key:
+            return None
+        try:
+            client = OpenAI(api_key=api_key)
+            # omni-moderation-latest accepts multimodal inputs via the array form.
+            resp = client.moderations.create(
+                model="omni-moderation-latest",
+                input=[{"type": "image_url", "image_url": {"url": image_data_url}}],
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning("OpenAI Moderation image check error: %s", e)
+            return None
+
+        result_obj = (resp.results or [None])[0]
+        if result_obj is None:
+            return None
+        try:
+            categories = result_obj.categories.model_dump()  # type: ignore[attr-defined]
+        except AttributeError:
+            categories = dict(getattr(result_obj, "categories", {}) or {})
+
+        flagged = bool(getattr(result_obj, "flagged", False))
+        breakdown = _format_breakdown(categories, message_id=0)
+        status: GuardrailStatus = {
+            "flagged": flagged,
+            "breakdown": breakdown,
+            "payload": [],
+            "metadata": {
+                "source": "openai_moderation",
+                "model": getattr(resp, "model", "omni-moderation-latest"),
+                "kind": "image",
             },
         }
         legacy_lakera.set_last_result(status)

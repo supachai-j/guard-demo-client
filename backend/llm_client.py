@@ -176,7 +176,15 @@ def _build_litellm_kwargs(
         kwargs["custom_llm_provider"] = "openai"
     elif pid == "portkey":
         # Portkey is OpenAI-compatible; auth via x-portkey-api-key + optional virtual key.
-        kwargs["api_base"] = "https://api.portkey.ai/v1"
+        # Self-managed deployments can override the gateway URL via portkey_base_url.
+        custom_base = (getattr(cfg, "portkey_base_url", None) or "").strip()
+        if custom_base:
+            base = custom_base.rstrip("/")
+            if not base.endswith("/v1"):
+                base = f"{base}/v1"
+            kwargs["api_base"] = base
+        else:
+            kwargs["api_base"] = "https://api.portkey.ai/v1"
         extra_headers: Dict[str, Any] = {
             "x-portkey-api-key": api_key or "",
         }
@@ -184,8 +192,6 @@ def _build_litellm_kwargs(
         if virtual_key:
             extra_headers["x-portkey-virtual-key"] = virtual_key
         kwargs["extra_headers"] = extra_headers
-        # Portkey accepts the OpenAI-compat path; the api_key arg above is the
-        # Bearer token Portkey ignores when x-portkey-api-key header is present.
         kwargs["custom_llm_provider"] = "openai"
     return kwargs
 
@@ -247,6 +253,73 @@ def chat_completion(
     if hasattr(response, "model_dump"):
         return response.model_dump()
     return dict(response)  # already a dict (unlikely)
+
+
+def chat_completion_stream(
+    messages: List[Dict[str, str]],
+    model: str = "gpt-4o",
+    temperature: Union[float, str, int, None] = 0.7,
+    config: Optional[AppConfig] = None,
+):
+    """Streaming version of chat_completion. Yields content-delta strings.
+
+    Tool-calls aren't supported in the streamed path — callers should use the
+    non-streaming `chat_completion` when the agent needs tools."""
+    cfg = config or _get_config()
+    if not llm_credentials_configured(cfg):
+        raise Exception("Configure LLM API key in Admin → Security")
+
+    try:
+        temp_float: Optional[float] = float(temperature) if temperature is not None else 0.7
+    except (ValueError, TypeError):
+        temp_float = 0.7
+    if temp_float is not None and temp_float > 1.0:
+        temp_float = temp_float / 10.0
+
+    kwargs = _build_litellm_kwargs(
+        cfg=cfg,
+        model=model,
+        temperature=temp_float,
+        messages=messages,
+        tools=None,
+    )
+    kwargs["stream"] = True
+
+    pid = provider_id(cfg)
+    try:
+        response = litellm_completion(**kwargs)
+    except APIConnectionError as e:
+        if pid == "litellm_proxy":
+            base = provider_base_url(cfg)
+            raise Exception(f"LiteLLM proxy unreachable: {e}. Is the proxy running on {base}?") from e
+        if pid == "ollama":
+            base = provider_base_url(cfg)
+            raise Exception(f"Ollama unreachable: {e}. Is Ollama running on {base}?") from e
+        raise
+    except BadRequestError as e:
+        if pid == "litellm_proxy":
+            lakera_status = _extract_litellm_guardrail_status(e)
+            if lakera_status:
+                raise LiteLLMGuardrailError(
+                    "LiteLLM guardrail blocked this response.", lakera_status
+                ) from e
+        raise Exception(f"LLM API error: {e}") from e
+
+    for chunk in response:
+        try:
+            if hasattr(chunk, "model_dump"):
+                chunk_d = chunk.model_dump()
+            else:
+                chunk_d = dict(chunk)
+            choices = chunk_d.get("choices") or []
+            if not choices:
+                continue
+            delta = choices[0].get("delta") or {}
+            content = delta.get("content")
+            if content:
+                yield content
+        except Exception:
+            continue
 
 
 def get_embeddings(texts: List[str], config: Optional[AppConfig] = None) -> List[List[float]]:

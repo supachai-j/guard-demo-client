@@ -1,16 +1,19 @@
+import time
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from . import lakera, llm_client, rag, toolhive
+from . import audit, lakera, llm_client, rag, toolhive
 from .guardrail_provider import active_provider_id, resolve_provider
-from .models import AppConfig
+from .models import AppConfig, Conversation, Message
+from .providers import provider_id as llm_provider_id
 
 
 class AgentRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
+    conversation_id: Optional[int] = None
 
 
 class AgentResult(BaseModel):
@@ -18,12 +21,47 @@ class AgentResult(BaseModel):
     citations: List[Dict[str, Any]] = []
     tool_traces: List[Dict[str, Any]] = []
     lakera_status: Optional[Dict[str, Any]] = None
+    conversation_id: Optional[int] = None
 
 
-async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResult:
+def _load_conversation_history(db: Session, conversation_id: Optional[int], limit: int = 10) -> List[Dict[str, Any]]:
+    """Return the last `limit` (user, assistant) turns formatted for the LLM."""
+    if not conversation_id:
+        return []
+    rows = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.id.desc())
+        .limit(limit * 2)
+        .all()
+    )
+    rows.reverse()
+    return [{"role": r.role, "content": r.content} for r in rows]
+
+
+def _ensure_conversation(db: Session, conversation_id: Optional[int], session_id: Optional[str], seed_title: str) -> Conversation:
+    if conversation_id:
+        conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if conv:
+            return conv
+    conv = Conversation(
+        title=(seed_title or "New conversation")[:80],
+        session_id=session_id,
+    )
+    db.add(conv)
+    db.commit()
+    db.refresh(conv)
+    return conv
+
+
+async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: bool = True) -> AgentResult:
     """
-    Main orchestrator function that coordinates RAG, tools, and OpenAI
+    Main orchestrator function that coordinates RAG, tools, and OpenAI.
+
+    persist=False is used by compare flows that want a clean run without
+    appending to conversation history / audit log (e.g. /api/chat/compare).
     """
+    _start_t = time.monotonic()
     # Step 0: Check user input with the active guardrail provider (pre-response check).
     # `lakera_enabled` is the master "guardrail enabled" toggle (legacy name);
     # `lakera_blocking_mode` is the "block vs monitor" switch — they apply to ALL providers.
@@ -58,6 +96,15 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
         else None
     )
 
+    # Multi-turn memory: ensure a Conversation row and load prior turns.
+    conv = None
+    history: List[Dict[str, Any]] = []
+    if persist:
+        conv = _ensure_conversation(db, req.conversation_id, req.session_id, req.message)
+        history = _load_conversation_history(db, conv.id)
+
+    active_llm_pid = llm_provider_id(cfg)
+
     if cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
         provider_name = active_guardrail.display_name
         print(f"🛡️ Checking user input with {provider_name}...")
@@ -75,11 +122,33 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
             print(f"⚠️ User input flagged by {provider_name}: {lakera_result.get('breakdown', [])}")
             if lakera_blocking_mode:
                 print(f"🚫 User input blocked by {provider_name} (blocking mode enabled)")
+                blocked_text = "This content has been moderated and found to be in breach of our security policies. Please contact support if you believe this is an error."
+                if persist and conv is not None:
+                    db.add(Message(conversation_id=conv.id, role="user", content=req.message,
+                                   flagged=True, guardrail_status=lakera_result))
+                    db.add(Message(conversation_id=conv.id, role="assistant", content=blocked_text,
+                                   flagged=True, guardrail_status=lakera_result))
+                    db.commit()
+                    audit.record_chat_turn(
+                        db,
+                        user_message=req.message,
+                        assistant_response=blocked_text,
+                        conversation_id=conv.id,
+                        session_id=req.session_id,
+                        llm_provider=active_llm_pid,
+                        llm_model=cfg.openai_model,
+                        guardrail_provider=guardrail_provider_id,
+                        guardrail_status=lakera_result,
+                        tool_traces=[],
+                        latency_ms=int((time.monotonic() - _start_t) * 1000),
+                        blocked=True,
+                    )
                 return AgentResult(
-                    response="This content has been moderated and found to be in breach of our security policies. Please contact support if you believe this is an error.",
+                    response=blocked_text,
                     citations=[],
                     tool_traces=[],
                     lakera_status=lakera_result,
+                    conversation_id=conv.id if conv else None,
                 )
             else:
                 print(f"📝 User input flagged by {provider_name} but allowed through (monitor mode)")
@@ -109,6 +178,10 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
     if context:
         context_text = "\n\n".join([doc["text"] for doc in context])
         messages.append({"role": "system", "content": f"Context information:\n{context_text}"})
+
+    # Multi-turn: replay prior conversation turns (after system prompts, before current user message).
+    if history:
+        messages.extend(history)
 
     # Add user message
     messages.append({"role": "user", "content": req.message})
@@ -262,24 +335,89 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
             lakera_status = {"flagged": False, "breakdown": [], "payload": [], "metadata": {"source": "litellm"}}
             lakera.set_last_result(lakera_status)
 
+        if persist and conv is not None:
+            db.add(Message(conversation_id=conv.id, role="user", content=req.message,
+                           flagged=False, guardrail_status=None))
+            db.add(Message(conversation_id=conv.id, role="assistant", content=response_text or "",
+                           flagged=bool(lakera_status and lakera_status.get("flagged")),
+                           guardrail_status=lakera_status))
+            db.commit()
+            audit.record_chat_turn(
+                db,
+                user_message=req.message,
+                assistant_response=response_text,
+                conversation_id=conv.id,
+                session_id=req.session_id,
+                llm_provider=active_llm_pid,
+                llm_model=cfg.openai_model,
+                guardrail_provider=guardrail_provider_id,
+                guardrail_status=lakera_status,
+                tool_traces=tool_traces,
+                latency_ms=int((time.monotonic() - _start_t) * 1000),
+                blocked=False,
+            )
+
         return AgentResult(
-            response=response_text, citations=citations, tool_traces=tool_traces, lakera_status=lakera_status
+            response=response_text,
+            citations=citations,
+            tool_traces=tool_traces,
+            lakera_status=lakera_status,
+            conversation_id=conv.id if conv else None,
         )
 
     except llm_client.LiteLLMGuardrailError as e:
         lakera_status = e.lakera_status if isinstance(e.lakera_status, dict) else None
         if lakera_status:
             lakera.set_last_result(lakera_status)
+        blocked_text = "This content has been moderated by Lakera and found to be in breach of our security policies. Please contact support if you believe this is an error."
+        if persist and conv is not None:
+            try:
+                audit.record_chat_turn(
+                    db,
+                    user_message=req.message,
+                    assistant_response=blocked_text,
+                    conversation_id=conv.id,
+                    session_id=req.session_id,
+                    llm_provider=active_llm_pid,
+                    llm_model=cfg.openai_model,
+                    guardrail_provider=guardrail_provider_id,
+                    guardrail_status=lakera_status,
+                    tool_traces=tool_traces if "tool_traces" in locals() else [],
+                    latency_ms=int((time.monotonic() - _start_t) * 1000),
+                    blocked=True,
+                )
+            except Exception:
+                pass
         return AgentResult(
-            response="This content has been moderated by Lakera and found to be in breach of our security policies. Please contact support if you believe this is an error.",
+            response=blocked_text,
             citations=citations,
             tool_traces=tool_traces if "tool_traces" in locals() else [],
             lakera_status=lakera_status,
+            conversation_id=conv.id if conv else None,
         )
     except Exception as e:
+        err_text = f"I apologize, but I encountered an error: {str(e)}"
+        if persist and conv is not None:
+            try:
+                audit.record_chat_turn(
+                    db,
+                    user_message=req.message,
+                    assistant_response=err_text,
+                    conversation_id=conv.id,
+                    session_id=req.session_id,
+                    llm_provider=active_llm_pid,
+                    llm_model=cfg.openai_model,
+                    guardrail_provider=guardrail_provider_id,
+                    tool_traces=tool_traces if "tool_traces" in locals() else [],
+                    latency_ms=int((time.monotonic() - _start_t) * 1000),
+                    error=str(e),
+                )
+            except Exception:
+                pass
         return AgentResult(
-            response=f"I apologize, but I encountered an error: {str(e)}",
+            response=err_text,
             citations=citations,
             tool_traces=tool_traces if "tool_traces" in locals() else [],
             lakera_status=None,
+            conversation_id=conv.id if conv else None,
         )

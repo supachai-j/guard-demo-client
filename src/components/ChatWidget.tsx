@@ -22,6 +22,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
   const [currentSuggestion, setCurrentSuggestion] = useState<DemoPromptSuggestion | null>(null);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [promptIdForNextSend, setPromptIdForNextSend] = useState<number | null>(null);
+  const [conversationId, setConversationId] = useState<number | undefined>(undefined);
+  const [streamMode, setStreamMode] = useState<boolean>(() => localStorage.getItem('chat_stream_mode') === '1');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -134,9 +136,37 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
     setIsLoading(true);
 
     try {
+      if (streamMode) {
+        // Stream tokens via SSE, render incrementally.
+        const assistantId = (Date.now() + 1).toString();
+        setMessages(prev => [...prev, {
+          id: assistantId, role: 'assistant', content: '', timestamp: new Date(),
+        }]);
+        let acc = '';
+        for await (const ev of apiService.streamChat(inputMessage, conversationId)) {
+          if (ev.kind === 'chunk' && ev.data?.text) {
+            acc += ev.data.text;
+            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: acc } : m));
+          } else if (ev.kind === 'done') {
+            if (ev.data?.conversation_id) setConversationId(ev.data.conversation_id);
+            if (ev.data?.lakera) {
+              setLastLakeraResult(ev.data.lakera);
+              setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, lakera: ev.data.lakera } : m));
+            }
+          } else if (ev.kind === 'blocked') {
+            const blockedTxt = 'This content has been moderated and found to be in breach of our security policies.';
+            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: blockedTxt, lakera: ev.data?.lakera } : m));
+            if (ev.data?.lakera) setLastLakeraResult(ev.data.lakera);
+            if (ev.data?.conversation_id) setConversationId(ev.data.conversation_id);
+          } else if (ev.kind === 'error') {
+            setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: `Stream error: ${ev.data?.message || ''}` } : m));
+          }
+        }
+      } else {
       const response = await apiService.sendMessage({
         message: inputMessage,
         ...(promptIdForNextSend != null ? { prompt_id: promptIdForNextSend } : {}),
+        ...(conversationId != null ? { conversation_id: conversationId } : {}),
       });
 
       const assistantMessage: ChatMessage = {
@@ -149,10 +179,14 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
       };
 
       setMessages(prev => [...prev, assistantMessage]);
-      
+
+      // Capture conversation_id for the next turn (multi-turn memory)
+      if ((response as any).conversation_id) setConversationId((response as any).conversation_id);
+
       // Update last Lakera result if available
       if (response.lakera) {
         setLastLakeraResult(response.lakera);
+      }
       }
     } catch (error) {
       console.error('Failed to send message:', error);
@@ -329,6 +363,33 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
                 >
                   <Send className="w-4 h-4" />
                 </button>
+              </div>
+              <div className="flex items-center justify-between text-xs text-gray-500 mt-1 px-1">
+                <div className="flex items-center gap-3">
+                  <label className="inline-flex items-center gap-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={streamMode}
+                      onChange={e => {
+                        setStreamMode(e.target.checked);
+                        localStorage.setItem('chat_stream_mode', e.target.checked ? '1' : '0');
+                      }}
+                    />
+                    Stream
+                  </label>
+                  {conversationId && (
+                    <span className="opacity-70">conv #{conversationId}</span>
+                  )}
+                </div>
+                {conversationId && (
+                  <button
+                    onClick={() => { setConversationId(undefined); setMessages([]); }}
+                    className="underline hover:text-gray-700"
+                    title="Start a fresh conversation (clears memory)"
+                  >
+                    New chat
+                  </button>
+                )}
               </div>
               
               {/* Suggestions dropdown */}

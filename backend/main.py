@@ -15,10 +15,21 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from . import lakera, llm_client, rag
+from . import audit, lakera, llm_client, rag
 from .agent import AgentRequest, run_agent
 from .database import engine, get_db
-from .models import AppConfig, Base, DemoPrompt, MCPToolCapabilities, RagSource, Tool
+from .models import (
+    AppConfig,
+    AuditLog,
+    Base,
+    Conversation,
+    DemoPrompt,
+    MCPToolCapabilities,
+    Message,
+    RagSource,
+    SessionRecording,
+    Tool,
+)
 from .guardrail_provider import list_providers_for_ui as list_guardrail_providers_for_ui
 from .providers import list_providers_for_ui
 from .scenarios import SCENARIOS, get_scenario
@@ -210,6 +221,36 @@ def _migrate_app_config_guardrail_provider():
 
 
 _migrate_app_config_guardrail_provider()
+
+
+def _migrate_app_config_portkey_base_url():
+    """Add portkey_base_url for self-managed Portkey deployments."""
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(app_config)"))
+        columns = [row[1] for row in r.fetchall()]
+        if "portkey_base_url" not in columns:
+            conn.execute(text("ALTER TABLE app_config ADD COLUMN portkey_base_url VARCHAR"))
+            conn.commit()
+
+
+def _migrate_app_config_cloudflare():
+    """Add Cloudflare Firewall for AI fields."""
+    new_columns = {
+        "cloudflare_account_id": "VARCHAR",
+        "cloudflare_api_token": "VARCHAR",
+        "cloudflare_gateway_id": "VARCHAR",
+    }
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(app_config)"))
+        columns = [row[1] for row in r.fetchall()]
+        for name, col_type in new_columns.items():
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE app_config ADD COLUMN {name} {col_type}"))
+                conn.commit()
+
+
+_migrate_app_config_portkey_base_url()
+_migrate_app_config_cloudflare()
 
 app = FastAPI(title="Agentic Demo API", description="Backend API for the Agentic Demo application", version="1.0.0")
 
@@ -787,7 +828,11 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
     _ensure_active_model_valid(config, db)
 
     # Create agent request
-    agent_request = AgentRequest(message=request.message, session_id=request.session_id)
+    agent_request = AgentRequest(
+        message=request.message,
+        session_id=request.session_id,
+        conversation_id=request.conversation_id,
+    )
 
     # Run agent
     result = await run_agent(agent_request, config, db)
@@ -797,7 +842,138 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
         lakera=result.lakera_status,
         tool_traces=result.tool_traces,
         citations=result.citations,
+        conversation_id=result.conversation_id,
     )
+
+
+@app.post("/api/chat/stream")
+async def chat_stream(request: ChatRequest, db: Session = Depends(get_db)):
+    """SSE streaming chat. Pre-guardrail runs before tokens; if blocked, emits
+    a single 'blocked' event and closes. Otherwise streams 'chunk' events,
+    then a final 'done' event with lakera+conversation_id+tool_traces."""
+    import asyncio
+    import time as _time
+
+    from .agent import _ensure_conversation, _load_conversation_history
+    from .guardrail_provider import active_provider_id as _active_gid
+    from .guardrail_provider import resolve_provider as _resolve_provider
+    from .providers import provider_id as _llm_pid
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    _ensure_active_model_valid(config, db)
+
+    async def event_stream():
+        start_t = _time.monotonic()
+        conv = _ensure_conversation(db, request.conversation_id, request.session_id, request.message)
+        history = _load_conversation_history(db, conv.id)
+
+        # Pre-guardrail
+        guardrail_pid = _active_gid(config) if config.lakera_enabled else None
+        active_guardrail = _resolve_provider(config) if config.lakera_enabled else None
+        pre_status = None
+        if active_guardrail:
+            pre_status = await active_guardrail.check_interaction(
+                messages=[{"role": "user", "content": request.message}],
+                cfg=config,
+                meta={"session_id": request.session_id} if request.session_id else None,
+                system_prompt=config.system_prompt,
+            )
+            if pre_status and pre_status.get("flagged") and config.lakera_blocking_mode:
+                blocked_text = "This content has been moderated and found to be in breach of our security policies."
+                db.add(Message(conversation_id=conv.id, role="user", content=request.message,
+                               flagged=True, guardrail_status=pre_status))
+                db.add(Message(conversation_id=conv.id, role="assistant", content=blocked_text,
+                               flagged=True, guardrail_status=pre_status))
+                db.commit()
+                audit.record_chat_turn(
+                    db,
+                    user_message=request.message,
+                    assistant_response=blocked_text,
+                    conversation_id=conv.id,
+                    session_id=request.session_id,
+                    llm_provider=_llm_pid(config),
+                    llm_model=config.openai_model,
+                    guardrail_provider=guardrail_pid,
+                    guardrail_status=pre_status,
+                    latency_ms=int((_time.monotonic() - start_t) * 1000),
+                    blocked=True,
+                )
+                yield f"event: blocked\ndata: {json.dumps({'lakera': pre_status, 'conversation_id': conv.id})}\n\n"
+                return
+
+        # Build messages (no tools in stream path)
+        messages: List[Dict[str, Any]] = []
+        if config.system_prompt:
+            messages.append({"role": "system", "content": config.system_prompt})
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": request.message})
+
+        # Stream the LLM
+        full_text_parts: List[str] = []
+        try:
+            loop = asyncio.get_event_loop()
+            def _gen():
+                return llm_client.chat_completion_stream(
+                    messages=messages,
+                    model=config.openai_model,
+                    temperature=config.temperature,
+                    config=config,
+                )
+
+            gen = await loop.run_in_executor(None, _gen)
+            for token in gen:
+                if not token:
+                    continue
+                full_text_parts.append(token)
+                yield f"event: chunk\ndata: {json.dumps({'text': token})}\n\n"
+        except Exception as e:
+            yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
+            return
+
+        response_text = "".join(full_text_parts)
+
+        # Post-guardrail
+        post_status = None
+        if active_guardrail:
+            post_status = await active_guardrail.check_interaction(
+                messages=[
+                    {"role": "user", "content": request.message},
+                    {"role": "assistant", "content": response_text},
+                ],
+                cfg=config,
+                meta={"session_id": request.session_id} if request.session_id else None,
+                system_prompt=config.system_prompt,
+            )
+            if post_status and post_status.get("flagged") and config.lakera_blocking_mode:
+                response_text = "This content has been moderated and found to be in breach of our security policies."
+
+        # Persist conversation + audit
+        db.add(Message(conversation_id=conv.id, role="user", content=request.message,
+                       flagged=False, guardrail_status=None))
+        db.add(Message(conversation_id=conv.id, role="assistant", content=response_text,
+                       flagged=bool(post_status and post_status.get("flagged")),
+                       guardrail_status=post_status))
+        db.commit()
+        audit.record_chat_turn(
+            db,
+            user_message=request.message,
+            assistant_response=response_text,
+            conversation_id=conv.id,
+            session_id=request.session_id,
+            llm_provider=_llm_pid(config),
+            llm_model=config.openai_model,
+            guardrail_provider=guardrail_pid,
+            guardrail_status=post_status,
+            latency_ms=int((_time.monotonic() - start_t) * 1000),
+            blocked=False,
+        )
+
+        yield f"event: done\ndata: {json.dumps({'lakera': post_status, 'conversation_id': conv.id, 'response': response_text})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
 
 
 class _ConfigOverride:
@@ -1355,6 +1531,390 @@ async def get_guardrail_providers():
     Bedrock Guardrails, …) plus the per-provider AppConfig fields each one
     needs."""
     return {"providers": list_guardrail_providers_for_ui()}
+
+
+# Demo recorder endpoints — capture sequences of prompts for replay
+@app.get("/api/recordings")
+async def list_recordings(db: Session = Depends(get_db)):
+    rows = db.query(SessionRecording).order_by(SessionRecording.created_at.desc()).all()
+    return {
+        "recordings": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "notes": r.notes,
+                "event_count": len(r.events or []),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.post("/api/recordings")
+async def create_recording(payload: dict, db: Session = Depends(get_db)):
+    """Save a captured session. Body: { name, notes?, events: [{ts,prompt,response,...}] }"""
+    name = (payload or {}).get("name") or f"Recording {datetime.utcnow().isoformat(timespec='seconds')}"
+    events = (payload or {}).get("events") or []
+    if not isinstance(events, list):
+        raise HTTPException(status_code=400, detail="events must be a list")
+    rec = SessionRecording(
+        name=name[:200],
+        notes=(payload or {}).get("notes"),
+        events=events,
+    )
+    db.add(rec)
+    db.commit()
+    db.refresh(rec)
+    return {"id": rec.id, "name": rec.name, "event_count": len(events)}
+
+
+@app.get("/api/recordings/{recording_id}")
+async def get_recording(recording_id: int, db: Session = Depends(get_db)):
+    rec = db.query(SessionRecording).filter(SessionRecording.id == recording_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    return {
+        "id": rec.id,
+        "name": rec.name,
+        "notes": rec.notes,
+        "events": rec.events or [],
+        "created_at": rec.created_at.isoformat() if rec.created_at else None,
+    }
+
+
+@app.delete("/api/recordings/{recording_id}")
+async def delete_recording(recording_id: int, db: Session = Depends(get_db)):
+    rec = db.query(SessionRecording).filter(SessionRecording.id == recording_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    db.delete(rec)
+    db.commit()
+    return {"deleted": recording_id}
+
+
+@app.post("/api/recordings/{recording_id}/replay")
+async def replay_recording(recording_id: int, db: Session = Depends(get_db)):
+    """Re-run every captured prompt through the current agent stack.
+
+    Each event in the recording must have a `prompt` field; the response is
+    captured along with the guardrail verdict so the caller can diff against
+    the original recording.
+    """
+    rec = db.query(SessionRecording).filter(SessionRecording.id == recording_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Recording not found")
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    _ensure_active_model_valid(config, db)
+
+    results: List[dict] = []
+    for event in rec.events or []:
+        prompt = (event or {}).get("prompt") if isinstance(event, dict) else None
+        if not prompt:
+            continue
+        req = AgentRequest(message=prompt, session_id=f"replay-{recording_id}")
+        result = await run_agent(req, config, db, persist=False)
+        results.append(
+            {
+                "prompt": prompt,
+                "original": event.get("response") if isinstance(event, dict) else None,
+                "replay_response": result.response,
+                "lakera": result.lakera_status,
+                "tool_traces": result.tool_traces,
+                "citations": result.citations,
+            }
+        )
+    return {"recording_id": recording_id, "name": rec.name, "results": results}
+
+
+# Playbook endpoints — predefined attack suites (OWASP LLM Top 10 etc.)
+from . import playbooks as _playbooks
+
+
+@app.get("/api/playbooks")
+async def list_playbooks():
+    """Catalog of attack playbooks the UI offers in the Threat Lab tab."""
+    return {"playbooks": _playbooks.list_playbooks()}
+
+
+@app.get("/api/playbooks/{playbook_id}")
+async def get_playbook(playbook_id: str):
+    pb = _playbooks.get_playbook(playbook_id)
+    if not pb:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+    return pb
+
+
+@app.post("/api/playbooks/{playbook_id}/run")
+async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
+    """Run every prompt in a playbook through the active guardrail provider.
+
+    Returns a per-prompt verdict + an aggregate detection rate so customers
+    can take a screenshot of their "OWASP Top 10 coverage" for the demo
+    write-up. Does NOT call the LLM — guardrail-only, fast (< 30s typically).
+    """
+    import asyncio as _aio
+
+    from .guardrail_provider import GUARDRAIL_PROVIDERS, active_provider_id
+
+    pb = _playbooks.get_playbook(playbook_id)
+    if not pb:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    pid = active_provider_id(config)
+    provider = GUARDRAIL_PROVIDERS.get(pid)
+    if not provider or not provider.is_configured(config):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Active guardrail provider '{pid}' is not configured. Set keys in Admin → Security.",
+        )
+
+    async def _scan(item):
+        try:
+            status = await provider.check_interaction(
+                messages=[{"role": "user", "content": item["prompt"]}],
+                cfg=config,
+                meta=None,
+                system_prompt=config.system_prompt,
+            )
+            return {
+                "id": item["id"],
+                "category": item["category"],
+                "prompt": item["prompt"],
+                "expected": item.get("expected"),
+                "flagged": bool(status and status.get("flagged")),
+                "breakdown": (status or {}).get("breakdown") or [],
+                "status": status,
+            }
+        except Exception as e:
+            return {
+                "id": item["id"],
+                "category": item["category"],
+                "prompt": item["prompt"],
+                "expected": item.get("expected"),
+                "flagged": False,
+                "error": str(e),
+            }
+
+    results = await _aio.gather(*[_scan(p) for p in pb["prompts"]])
+    detected = sum(1 for r in results if r.get("flagged"))
+    total = len(results)
+    return {
+        "playbook_id": playbook_id,
+        "playbook_name": pb["name"],
+        "guardrail_provider": pid,
+        "guardrail_display_name": provider.display_name,
+        "detection_rate": round(100.0 * detected / total, 1) if total else 0.0,
+        "detected": detected,
+        "total": total,
+        "results": results,
+    }
+
+
+# Guardrail compare — fan a prompt out to every configured guardrail provider
+@app.post("/api/chat/compare-guardrails")
+async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)):
+    """Run the user's message through every configured guardrail provider in
+    parallel and return per-provider verdicts (with latency).
+
+    Used by the Admin → Compare matrix to show how each vendor sees the same
+    payload. Does NOT call the LLM — guardrail check only."""
+    import asyncio as _aio
+    import time as _t
+
+    from .guardrail_provider import GUARDRAIL_PROVIDERS
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    if not (request.message or "").strip():
+        raise HTTPException(status_code=400, detail="message is required")
+
+    msgs = [{"role": "user", "content": request.message}]
+
+    async def _run_one(pid: str, provider):
+        if not provider.is_configured(config):
+            return {
+                "provider": pid,
+                "display_name": provider.display_name,
+                "configured": False,
+                "status": None,
+                "latency_ms": 0,
+                "error": None,
+            }
+        t0 = _t.monotonic()
+        try:
+            status = await provider.check_interaction(
+                messages=msgs,
+                cfg=config,
+                meta={"session_id": request.session_id} if request.session_id else None,
+                system_prompt=config.system_prompt,
+            )
+            return {
+                "provider": pid,
+                "display_name": provider.display_name,
+                "configured": True,
+                "status": status,
+                "latency_ms": int((_t.monotonic() - t0) * 1000),
+                "error": None,
+            }
+        except Exception as e:
+            return {
+                "provider": pid,
+                "display_name": provider.display_name,
+                "configured": True,
+                "status": None,
+                "latency_ms": int((_t.monotonic() - t0) * 1000),
+                "error": str(e),
+            }
+
+    tasks = [_run_one(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items()]
+    results = await _aio.gather(*tasks)
+    return {"message": request.message, "results": results}
+
+
+# Image moderation
+@app.post("/api/moderation/image")
+async def moderate_image(payload: dict, db: Session = Depends(get_db)):
+    """Scan an image with the active guardrail provider.
+
+    Body: { "image_data_url": "data:image/png;base64,..." }
+    Returns the same Lakera-shaped status the chat path uses, with an extra
+    `supported: bool` so the UI can show a clear "not supported by this
+    provider" badge instead of an empty result.
+    """
+    from .guardrail_provider import GUARDRAIL_PROVIDERS, active_provider_id
+
+    image_data_url = (payload or {}).get("image_data_url")
+    if not image_data_url:
+        raise HTTPException(status_code=400, detail="image_data_url is required")
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+    pid = active_provider_id(config)
+    provider = GUARDRAIL_PROVIDERS.get(pid)
+    if not provider:
+        raise HTTPException(status_code=400, detail=f"No guardrail provider configured ({pid})")
+    if not provider.is_configured(config):
+        raise HTTPException(status_code=400, detail=f"Guardrail provider {pid} missing credentials")
+    if not getattr(provider, "supports_image", False):
+        return {
+            "supported": False,
+            "provider": pid,
+            "status": {
+                "flagged": False,
+                "breakdown": [],
+                "payload": [],
+                "metadata": {"source": pid, "skipped": "image_moderation_not_supported"},
+            },
+        }
+    status = await provider.check_image(image_data_url, config)
+    return {"supported": True, "provider": pid, "status": status}
+
+
+# Audit log endpoints
+@app.get("/api/audit")
+async def get_audit_log(
+    format: str = "json",
+    limit: int = 200,
+    offset: int = 0,
+    flagged_only: bool = False,
+    session_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Return audit_log rows. format=csv returns text/csv attachment."""
+    entries = audit.list_entries(
+        db,
+        limit=min(max(limit, 1), 1000),
+        offset=max(offset, 0),
+        flagged_only=flagged_only,
+        session_id=session_id,
+    )
+    if format == "csv":
+        csv_text = audit.to_csv(entries)
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        return StreamingResponse(
+            io.BytesIO(csv_text.encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=audit_{timestamp}.csv"},
+        )
+    return {"entries": entries, "count": len(entries)}
+
+
+@app.delete("/api/audit")
+async def clear_audit_log(db: Session = Depends(get_db)):
+    """Wipe audit_log entries (admin / demo-reset only)."""
+    deleted = db.query(AuditLog).delete()
+    db.commit()
+    return {"deleted": deleted}
+
+
+# Conversation (multi-turn memory) endpoints
+@app.get("/api/conversations")
+async def list_conversations(limit: int = 50, db: Session = Depends(get_db)):
+    rows = (
+        db.query(Conversation)
+        .order_by(Conversation.updated_at.desc())
+        .limit(min(max(limit, 1), 200))
+        .all()
+    )
+    return {
+        "conversations": [
+            {
+                "id": r.id,
+                "title": r.title,
+                "session_id": r.session_id,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            }
+            for r in rows
+        ]
+    }
+
+
+@app.get("/api/conversations/{conversation_id}")
+async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    msgs = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation_id)
+        .order_by(Message.id.asc())
+        .all()
+    )
+    return {
+        "id": conv.id,
+        "title": conv.title,
+        "session_id": conv.session_id,
+        "messages": [
+            {
+                "id": m.id,
+                "role": m.role,
+                "content": m.content,
+                "flagged": bool(m.flagged),
+                "guardrail_status": m.guardrail_status,
+                "created_at": m.created_at.isoformat() if m.created_at else None,
+            }
+            for m in msgs
+        ],
+    }
+
+
+@app.delete("/api/conversations/{conversation_id}")
+async def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    db.query(Message).filter(Message.conversation_id == conversation_id).delete()
+    db.delete(conv)
+    db.commit()
+    return {"deleted": conversation_id}
 
 
 # Scenario endpoints — one-click demo company switcher on the Landing page

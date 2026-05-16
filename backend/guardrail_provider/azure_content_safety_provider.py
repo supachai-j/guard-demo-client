@@ -118,6 +118,7 @@ def _format_shield(
 class AzureContentSafetyProvider(GuardrailProvider):
     id = "azure_content_safety"
     display_name = "Azure AI Content Safety"
+    supports_image = True
 
     @classmethod
     def is_configured(cls, cfg: Any) -> bool:
@@ -226,6 +227,63 @@ class AzureContentSafetyProvider(GuardrailProvider):
             "metadata": {
                 "source": "azure_content_safety",
                 "endpoint": endpoint,
+                "api_version": _API_VERSION,
+            },
+        }
+        legacy_lakera.set_last_result(status)
+        return status
+
+    async def check_image(
+        self,
+        image_data_url: str,
+        cfg: Any,
+        meta: Optional[Dict[str, Any]] = None,
+    ) -> Optional[GuardrailStatus]:
+        """Azure image:analyze accepts base64 content (no data: prefix)."""
+        endpoint = (getattr(cfg, "azure_content_safety_endpoint", None) or "").rstrip("/")
+        key = getattr(cfg, "azure_content_safety_key", None)
+        if not endpoint or not key or not image_data_url:
+            return None
+
+        # Strip "data:image/png;base64," prefix if present
+        b64 = image_data_url
+        if "," in b64 and b64.startswith("data:"):
+            b64 = b64.split(",", 1)[1]
+
+        headers = {
+            "Ocp-Apim-Subscription-Key": key,
+            "Content-Type": "application/json",
+        }
+        url = f"{endpoint}/contentsafety/image:analyze?api-version={_API_VERSION}"
+        body = {
+            "image": {"content": b64},
+            "outputType": "FourSeverityLevels",
+        }
+        try:
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, headers=headers, json=body)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Azure image:analyze transport error: %s", e)
+            return None
+
+        if resp.status_code >= 400:
+            logger.warning("Azure image:analyze HTTP %s: %s", resp.status_code, resp.text[:200])
+            return None
+
+        try:
+            data = resp.json()
+        except Exception:
+            return None
+
+        breakdown = _format_categories(data.get("categoriesAnalysis") or [], message_id=0)
+        flagged = any(b.get("detected") for b in breakdown)
+        status: GuardrailStatus = {
+            "flagged": flagged,
+            "breakdown": breakdown,
+            "payload": [],
+            "metadata": {
+                "source": "azure_content_safety",
+                "kind": "image",
                 "api_version": _API_VERSION,
             },
         }
