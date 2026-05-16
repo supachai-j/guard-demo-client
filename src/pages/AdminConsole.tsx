@@ -11,11 +11,14 @@ import DemoPromptManager from '../components/DemoPromptManager';
 import UIToggles from '../components/UIToggles';
 import ThreatLab from '../components/ThreatLab';
 import { useUI } from '../i18n/UIContext';
+import { useAuth } from '../auth/AuthContext';
+import { LogOut } from 'lucide-react';
 
 type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'prompts' | 'threat-lab' | 'export';
 
 const AdminConsole: React.FC = () => {
   const { t } = useUI();
+  const { user, logout } = useAuth();
   const [activeTab, setActiveTab] = useState<TabType>('setup');
   const [config, setConfig] = useState<AppConfig | null>(null);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -460,7 +463,21 @@ const AdminConsole: React.FC = () => {
               </Link>
             </div>
             <h1 className="text-xl font-bold text-gray-900 dark:text-slate-100">{t('adminConsole')}</h1>
-            <UIToggles />
+            <div className="flex items-center gap-3">
+              <UIToggles />
+              {user && (
+                <div className="flex items-center gap-2 pl-3 border-l border-gray-200 dark:border-slate-600">
+                  <span className="text-xs text-gray-500 dark:text-slate-400">{user}</span>
+                  <button
+                    onClick={async () => { await logout(); window.location.href = '/login'; }}
+                    title="Log out"
+                    className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-700"
+                  >
+                    <LogOut className="w-3.5 h-3.5" /> Log out
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </header>

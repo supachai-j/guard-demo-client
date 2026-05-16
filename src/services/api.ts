@@ -19,6 +19,27 @@ import {
 
 const API_BASE = '/api';
 
+const TOKEN_STORAGE_KEY = 'admin_token';
+
+/** Auth token getter — kept here so non-React modules (services, lifecycle
+ * hooks) can read the same source as the AuthContext writes to. */
+const getToken = (): string | null => {
+  try { return localStorage.getItem(TOKEN_STORAGE_KEY); } catch { return null; }
+};
+
+const clearTokenAndRedirect = () => {
+  try {
+    localStorage.removeItem(TOKEN_STORAGE_KEY);
+    localStorage.removeItem('admin_user');
+    localStorage.removeItem('admin_token_exp');
+  } catch { /* ignore */ }
+  // Avoid bouncing the login page on itself.
+  if (typeof window !== 'undefined' && !window.location.pathname.endsWith('/login')) {
+    const dest = encodeURIComponent(window.location.pathname + window.location.search);
+    window.location.replace(`/login?next=${dest}`);
+  }
+};
+
 class ApiService {
   private async parseError(response: Response, fallback: string): Promise<never> {
     let detail = fallback;
@@ -33,13 +54,27 @@ class ApiService {
   }
 
   private async request<T>(endpoint: string, options?: RequestInit): Promise<T> {
+    // Auto-attach the Bearer token if one is stored. Skip for the login + auth
+    // status endpoints so a stale token can't fail a fresh login attempt.
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(options?.headers as Record<string, string> | undefined),
+    };
+    const token = getToken();
+    const skipAuth = endpoint.startsWith('/auth/login') || endpoint.startsWith('/auth/status');
+    if (token && !skipAuth && !headers.Authorization) {
+      headers.Authorization = `Bearer ${token}`;
+    }
+
     const response = await fetch(`${API_BASE}${endpoint}`, {
-      headers: {
-        'Content-Type': 'application/json',
-        ...options?.headers,
-      },
       ...options,
+      headers,
     });
+
+    if (response.status === 401 && !skipAuth) {
+      clearTokenAndRedirect();
+      throw new Error('Session expired. Please log in again.');
+    }
 
     if (!response.ok) return this.parseError(response, `API request failed: ${response.statusText}`);
 
@@ -65,7 +100,11 @@ class ApiService {
       params.set('include', include.join(','));
     }
     const url = `${API_BASE}/config/export?${params.toString()}`;
-    const response = await fetch(url);
+    const token = getToken();
+    const response = await fetch(url, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (response.status === 401) { clearTokenAndRedirect(); throw new Error('Session expired'); }
     if (!response.ok) {
       throw new Error('Export failed');
     }
@@ -76,11 +115,14 @@ class ApiService {
     const formData = new FormData();
     formData.append('file', file);
 
+    const token = getToken();
     const response = await fetch(`${API_BASE}/config/import`, {
       method: 'POST',
       body: formData,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
 
+    if (response.status === 401) { clearTokenAndRedirect(); throw new Error('Session expired'); }
     if (!response.ok) {
       return this.parseError(response, 'Import failed');
     }
@@ -101,11 +143,14 @@ class ApiService {
     const formData = new FormData();
     formData.append('file', file);
 
+    const token = getToken();
     const response = await fetch(`${API_BASE}/rag/upload`, {
       method: 'POST',
       body: formData,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
 
+    if (response.status === 401) { clearTokenAndRedirect(); throw new Error('Session expired'); }
     if (!response.ok) {
       return this.parseError(response, 'File upload failed');
     }
@@ -255,7 +300,29 @@ class ApiService {
   }
 
   exportAuditCsvUrl(): string {
+    // CSV/PDF downloads are triggered via <a href>, so we can't attach an
+    // Authorization header — fetch the file via blob with token instead.
     return `${API_BASE}/audit?format=csv&limit=1000`;
+  }
+
+  async downloadAuditCsv(): Promise<Blob> {
+    const token = getToken();
+    const resp = await fetch(`${API_BASE}/audit?format=csv&limit=1000`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (resp.status === 401) { clearTokenAndRedirect(); throw new Error('Session expired'); }
+    if (!resp.ok) throw new Error('Audit CSV download failed');
+    return resp.blob();
+  }
+
+  async downloadAuditPdf(): Promise<Blob> {
+    const token = getToken();
+    const resp = await fetch(`${API_BASE}/audit/report.pdf?limit=500`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (resp.status === 401) { clearTokenAndRedirect(); throw new Error('Session expired'); }
+    if (!resp.ok) throw new Error('Audit PDF download failed');
+    return resp.blob();
   }
 
   async clearAuditLog(): Promise<{ deleted: number }> {
@@ -346,7 +413,13 @@ class ApiService {
   async batchRun(file: File): Promise<any> {
     const fd = new FormData();
     fd.append('file', file);
-    const resp = await fetch(`${API_BASE}/batch/run`, { method: 'POST', body: fd });
+    const token = getToken();
+    const resp = await fetch(`${API_BASE}/batch/run`, {
+      method: 'POST',
+      body: fd,
+      headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    });
+    if (resp.status === 401) { clearTokenAndRedirect(); throw new Error('Session expired'); }
     if (!resp.ok) return this.parseError(resp, 'batch run failed');
     return resp.json();
   }
@@ -366,9 +439,12 @@ class ApiService {
 
   // Streaming chat — returns an async iterator of token strings.
   async *streamChat(message: string, conversationId?: number, sessionId?: string): AsyncGenerator<{ kind: 'chunk' | 'done' | 'blocked' | 'error'; data: any }> {
+    const token = getToken();
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
     const resp = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({ message, conversation_id: conversationId, session_id: sessionId }),
     });
     if (!resp.body) throw new Error('No streaming response body');

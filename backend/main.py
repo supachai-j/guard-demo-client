@@ -315,21 +315,79 @@ async def health_check():
 
 @app.get("/api/auth/status")
 async def get_auth_status():
-    """Whether the admin endpoints require basic-auth (env-gated)."""
+    """Public — frontend uses this to decide whether to show the login screen."""
     return _auth.auth_status()
+
+
+@app.post("/api/auth/login", response_model=_auth.LoginResponse)
+async def login(body: _auth.LoginRequest):
+    """Validate credentials and return a JWT bearer token."""
+    result = _auth.authenticate(body.username, body.password)
+    if not result:
+        raise HTTPException(status_code=401, detail="Invalid username or password.")
+    token, expires = result
+    return _auth.LoginResponse(access_token=token, token_type="bearer", expires_at=expires, user=body.username)
+
+
+@app.get("/api/auth/me", response_model=_auth.MeResponse)
+async def me(user: str = Depends(_auth.require_admin)):
+    """Return the current authenticated user. 401 when no/expired token."""
+    return _auth.MeResponse(user=user)
+
+
+@app.post("/api/auth/logout")
+async def logout(user: str = Depends(_auth.require_admin)):
+    """JWT is stateless — logout is a client-side concern (drop the token).
+    Endpoint exists so the UI can confirm the call succeeded."""
+    return {"logged_out": True, "user": user}
+
+
+# Fields that must be hidden from non-admin callers (every credential).
+_SECRET_CONFIG_FIELDS = (
+    "openai_api_key", "anthropic_api_key", "google_api_key", "mistral_api_key",
+    "groq_api_key", "together_api_key",
+    "lakera_api_key", "litellm_virtual_key",
+    "bedrock_access_key_id", "bedrock_secret_access_key",
+    "azure_content_safety_key",
+    "palo_alto_api_key",
+    "portkey_api_key", "portkey_virtual_key",
+    "cloudflare_api_token",
+)
+
+
+def _config_response(config: AppConfig, *, authenticated: bool) -> AppConfig:
+    """Return a config view with secrets blanked for non-admins.
+
+    The Landing page reads /api/config for branding fields; we don't want
+    those visitors to see API keys. The AdminConsole sends a Bearer token
+    so it gets the unredacted config."""
+    if authenticated:
+        return config
+    # Build a shallow copy that pydantic can serialise; we just blank the
+    # secret fields in-place but on a *detached* attribute dict so the DB
+    # row isn't mutated.
+    from copy import copy as _copy
+    safe = _copy(config)
+    for field in _SECRET_CONFIG_FIELDS:
+        if hasattr(safe, field) and getattr(safe, field, None):
+            setattr(safe, field, "***")
+    return safe
 
 
 # App Config endpoints
 @app.get("/api/config", response_model=AppConfigResponse)
-async def get_config(db: Session = Depends(get_db)):
+async def get_config(
+    user: Optional[str] = Depends(_auth.current_user),
+    db: Session = Depends(get_db),
+):
+    """Public read; secret fields are masked unless the caller is admin."""
     config = db.query(AppConfig).first()
     if not config:
-        # Create default config
         config = AppConfig()
         db.add(config)
         db.commit()
         db.refresh(config)
-    return config
+    return _config_response(config, authenticated=bool(user))
 
 
 @app.put("/api/config", response_model=AppConfigResponse, dependencies=[Depends(_auth.require_admin)])
@@ -379,7 +437,7 @@ EXPORT_SECTIONS = {
 SAFE_DEFAULT_INCLUDE = ["appearance", "llm", "security", "rag_scanning", "demo_prompts", "tools", "rag"]
 
 
-@app.get("/api/config/export")
+@app.get("/api/config/export", dependencies=[Depends(_auth.require_admin)])
 async def export_config(include: Optional[str] = None, version: Optional[str] = None, db: Session = Depends(get_db)):
     """Export configuration as a zip file (v2.0 format with metadata.json and section includes).
     Query params: include=appearance,llm,... (comma-separated; omit = safe default); version=2 (UI sends this to request v2 export)."""
@@ -511,7 +569,7 @@ async def export_config(include: Optional[str] = None, version: Optional[str] = 
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}") from e
 
 
-@app.post("/api/config/import")
+@app.post("/api/config/import", dependencies=[Depends(_auth.require_admin)])
 async def import_config(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Import configuration from a zip file. Supports v1.0 (full replace) and v2.0 (merge by section)."""
     try:
@@ -1082,7 +1140,7 @@ async def chat_compare(request: ChatRequest, db: Session = Depends(get_db)):
 
 
 # RAG endpoints
-@app.post("/api/rag/generate", response_model=RagGenerateResponse)
+@app.post("/api/rag/generate", response_model=RagGenerateResponse, dependencies=[Depends(_auth.require_admin)])
 async def generate_rag_content(request: RagGenerateRequest, db: Session = Depends(get_db)):
     try:
         # Generate content
@@ -1140,7 +1198,7 @@ async def get_rag_sources(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to get RAG sources: {str(e)}") from e
 
 
-@app.delete("/api/rag/clear")
+@app.delete("/api/rag/clear", dependencies=[Depends(_auth.require_admin)])
 async def clear_rag_content(db: Session = Depends(get_db)):
     """Clear all RAG content"""
     try:
@@ -1176,7 +1234,7 @@ async def clear_rag_content(db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail=f"Failed to clear RAG content: {str(e)}") from e
 
 
-@app.post("/api/rag/upload")
+@app.post("/api/rag/upload", dependencies=[Depends(_auth.require_admin)])
 async def upload_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload and ingest a file into the RAG system"""
     try:
@@ -1253,7 +1311,7 @@ async def get_tools(db: Session = Depends(get_db)):
     return tools
 
 
-@app.post("/api/tools", response_model=ToolResponse)
+@app.post("/api/tools", response_model=ToolResponse, dependencies=[Depends(_auth.require_admin)])
 async def create_tool(tool: ToolCreate, db: Session = Depends(get_db)):
     db_tool = Tool(**tool.dict())
     db.add(db_tool)
@@ -1262,7 +1320,7 @@ async def create_tool(tool: ToolCreate, db: Session = Depends(get_db)):
     return db_tool
 
 
-@app.put("/api/tools/{tool_id}", response_model=ToolResponse)
+@app.put("/api/tools/{tool_id}", response_model=ToolResponse, dependencies=[Depends(_auth.require_admin)])
 async def update_tool(tool_id: int, tool: ToolUpdate, db: Session = Depends(get_db)):
     db_tool = db.query(Tool).filter(Tool.id == tool_id).first()
     if not db_tool:
@@ -1276,7 +1334,7 @@ async def update_tool(tool_id: int, tool: ToolUpdate, db: Session = Depends(get_
     return db_tool
 
 
-@app.delete("/api/tools/{tool_id}")
+@app.delete("/api/tools/{tool_id}", dependencies=[Depends(_auth.require_admin)])
 async def delete_tool(tool_id: int, db: Session = Depends(get_db)):
     db_tool = db.query(Tool).filter(Tool.id == tool_id).first()
     if not db_tool:
@@ -1287,7 +1345,7 @@ async def delete_tool(tool_id: int, db: Session = Depends(get_db)):
     return {"message": "Tool deleted"}
 
 
-@app.post("/api/tools/test/{tool_id}")
+@app.post("/api/tools/test/{tool_id}", dependencies=[Depends(_auth.require_admin)])
 async def test_tool(tool_id: int, db: Session = Depends(get_db)):
     """Test a tool's connectivity and basic functionality"""
     tool = db.query(Tool).filter(Tool.id == tool_id).first()
@@ -1471,7 +1529,7 @@ async def search_demo_prompts(q: str, category: Optional[str] = None, limit: int
     }
 
 
-@app.post("/api/demo-prompts", response_model=DemoPromptResponse)
+@app.post("/api/demo-prompts", response_model=DemoPromptResponse, dependencies=[Depends(_auth.require_admin)])
 async def create_demo_prompt(prompt: DemoPromptCreate, db: Session = Depends(get_db)):
     """Create a new demo prompt"""
     db_prompt = DemoPrompt(**prompt.dict())
@@ -1481,7 +1539,7 @@ async def create_demo_prompt(prompt: DemoPromptCreate, db: Session = Depends(get
     return db_prompt
 
 
-@app.put("/api/demo-prompts/{prompt_id}", response_model=DemoPromptResponse)
+@app.put("/api/demo-prompts/{prompt_id}", response_model=DemoPromptResponse, dependencies=[Depends(_auth.require_admin)])
 async def update_demo_prompt(prompt_id: int, prompt: DemoPromptUpdate, db: Session = Depends(get_db)):
     """Update an existing demo prompt"""
     db_prompt = db.query(DemoPrompt).filter(DemoPrompt.id == prompt_id).first()
@@ -1496,7 +1554,7 @@ async def update_demo_prompt(prompt_id: int, prompt: DemoPromptUpdate, db: Sessi
     return db_prompt
 
 
-@app.delete("/api/demo-prompts/{prompt_id}")
+@app.delete("/api/demo-prompts/{prompt_id}", dependencies=[Depends(_auth.require_admin)])
 async def delete_demo_prompt(prompt_id: int, db: Session = Depends(get_db)):
     """Delete a demo prompt"""
     db_prompt = db.query(DemoPrompt).filter(DemoPrompt.id == prompt_id).first()
@@ -1583,7 +1641,7 @@ async def get_guardrail_providers():
 
 
 # Demo recorder endpoints — capture sequences of prompts for replay
-@app.get("/api/recordings")
+@app.get("/api/recordings", dependencies=[Depends(_auth.require_admin)])
 async def list_recordings(db: Session = Depends(get_db)):
     rows = db.query(SessionRecording).order_by(SessionRecording.created_at.desc()).all()
     return {
@@ -1600,7 +1658,7 @@ async def list_recordings(db: Session = Depends(get_db)):
     }
 
 
-@app.post("/api/recordings")
+@app.post("/api/recordings", dependencies=[Depends(_auth.require_admin)])
 async def create_recording(payload: dict, db: Session = Depends(get_db)):
     """Save a captured session. Body: { name, notes?, events: [{ts,prompt,response,...}] }"""
     name = (payload or {}).get("name") or f"Recording {datetime.utcnow().isoformat(timespec='seconds')}"
@@ -1618,7 +1676,7 @@ async def create_recording(payload: dict, db: Session = Depends(get_db)):
     return {"id": rec.id, "name": rec.name, "event_count": len(events)}
 
 
-@app.get("/api/recordings/{recording_id}")
+@app.get("/api/recordings/{recording_id}", dependencies=[Depends(_auth.require_admin)])
 async def get_recording(recording_id: int, db: Session = Depends(get_db)):
     rec = db.query(SessionRecording).filter(SessionRecording.id == recording_id).first()
     if not rec:
@@ -1632,7 +1690,7 @@ async def get_recording(recording_id: int, db: Session = Depends(get_db)):
     }
 
 
-@app.delete("/api/recordings/{recording_id}")
+@app.delete("/api/recordings/{recording_id}", dependencies=[Depends(_auth.require_admin)])
 async def delete_recording(recording_id: int, db: Session = Depends(get_db)):
     rec = db.query(SessionRecording).filter(SessionRecording.id == recording_id).first()
     if not rec:
@@ -1642,7 +1700,7 @@ async def delete_recording(recording_id: int, db: Session = Depends(get_db)):
     return {"deleted": recording_id}
 
 
-@app.post("/api/recordings/{recording_id}/replay")
+@app.post("/api/recordings/{recording_id}/replay", dependencies=[Depends(_auth.require_admin)])
 async def replay_recording(recording_id: int, db: Session = Depends(get_db)):
     """Re-run every captured prompt through the current agent stack.
 
@@ -1696,7 +1754,7 @@ async def get_playbook(playbook_id: str):
     return pb
 
 
-@app.post("/api/playbooks/{playbook_id}/run")
+@app.post("/api/playbooks/{playbook_id}/run", dependencies=[Depends(_auth.require_admin)])
 async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
     """Run every prompt in a playbook through the active guardrail provider.
 
@@ -1779,7 +1837,7 @@ async def test_webhook(payload: dict, db: Session = Depends(get_db)):
 
 
 # Audit cost summary — for the Threat Lab Cost panel
-@app.get("/api/audit/cost-summary")
+@app.get("/api/audit/cost-summary", dependencies=[Depends(_auth.require_admin)])
 async def audit_cost_summary(db: Session = Depends(get_db)):
     """Aggregate audit_log into per-provider cost/tokens for the Cost panel."""
     rows = audit.list_entries(db, limit=1000)
@@ -1808,7 +1866,7 @@ async def audit_cost_summary(db: Session = Depends(get_db)):
 
 
 # PDF audit report — render audit log summary as a printable PDF
-@app.get("/api/audit/report.pdf")
+@app.get("/api/audit/report.pdf", dependencies=[Depends(_auth.require_admin)])
 async def audit_report_pdf(limit: int = 200, db: Session = Depends(get_db)):
     """Render the last N audit entries as a 1-2 page PDF summary."""
     from reportlab.lib import colors
@@ -1899,7 +1957,7 @@ async def audit_report_pdf(limit: int = 200, db: Session = Depends(get_db)):
 
 
 # Batch eval — upload CSV of prompts, return verdict matrix
-@app.post("/api/batch/run")
+@app.post("/api/batch/run", dependencies=[Depends(_auth.require_admin)])
 async def batch_run(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Upload a CSV with a 'prompt' column (or one prompt per line if no
     header). For each prompt, run the active guardrail and return verdict +
@@ -1977,7 +2035,7 @@ async def batch_run(file: UploadFile = File(...), db: Session = Depends(get_db))
 
 
 # Provider health checks — ping every configured LLM + guardrail
-@app.get("/api/health/providers")
+@app.get("/api/health/providers", dependencies=[Depends(_auth.require_admin)])
 async def health_providers(db: Session = Depends(get_db)):
     """For each configured LLM provider, send a 1-token "ping" request; for
     each configured guardrail, run a benign 1-word check. Returns up/down +
@@ -2049,7 +2107,7 @@ async def health_providers(db: Session = Depends(get_db)):
 
 
 # Compare-All LLMs — fan a prompt to multiple LLM providers in parallel
-@app.post("/api/chat/compare-llms")
+@app.post("/api/chat/compare-llms", dependencies=[Depends(_auth.require_admin)])
 async def compare_llms(payload: dict, db: Session = Depends(get_db)):
     """Run the same prompt through multiple LLM providers (each with its own
     model + key as configured in AppConfig) and return per-provider response,
@@ -2128,7 +2186,7 @@ async def compare_llms(payload: dict, db: Session = Depends(get_db)):
 
 
 # Guardrail compare — fan a prompt out to every configured guardrail provider
-@app.post("/api/chat/compare-guardrails")
+@app.post("/api/chat/compare-guardrails", dependencies=[Depends(_auth.require_admin)])
 async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)):
     """Run the user's message through every configured guardrail provider in
     parallel and return per-provider verdicts (with latency).
@@ -2190,7 +2248,7 @@ async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)
 
 
 # Image moderation
-@app.post("/api/moderation/image")
+@app.post("/api/moderation/image", dependencies=[Depends(_auth.require_admin)])
 async def moderate_image(payload: dict, db: Session = Depends(get_db)):
     """Scan an image with the active guardrail provider.
 
@@ -2229,7 +2287,7 @@ async def moderate_image(payload: dict, db: Session = Depends(get_db)):
 
 
 # Audit log endpoints
-@app.get("/api/audit")
+@app.get("/api/audit", dependencies=[Depends(_auth.require_admin)])
 async def get_audit_log(
     format: str = "json",
     limit: int = 200,
@@ -2257,7 +2315,7 @@ async def get_audit_log(
     return {"entries": entries, "count": len(entries)}
 
 
-@app.delete("/api/audit")
+@app.delete("/api/audit", dependencies=[Depends(_auth.require_admin)])
 async def clear_audit_log(db: Session = Depends(get_db)):
     """Wipe audit_log entries (admin / demo-reset only)."""
     deleted = db.query(AuditLog).delete()
@@ -2266,7 +2324,7 @@ async def clear_audit_log(db: Session = Depends(get_db)):
 
 
 # Conversation (multi-turn memory) endpoints
-@app.get("/api/conversations")
+@app.get("/api/conversations", dependencies=[Depends(_auth.require_admin)])
 async def list_conversations(limit: int = 50, db: Session = Depends(get_db)):
     rows = (
         db.query(Conversation)
@@ -2288,7 +2346,7 @@ async def list_conversations(limit: int = 50, db: Session = Depends(get_db)):
     }
 
 
-@app.get("/api/conversations/{conversation_id}")
+@app.get("/api/conversations/{conversation_id}", dependencies=[Depends(_auth.require_admin)])
 async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conv:
@@ -2317,7 +2375,7 @@ async def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
     }
 
 
-@app.delete("/api/conversations/{conversation_id}")
+@app.delete("/api/conversations/{conversation_id}", dependencies=[Depends(_auth.require_admin)])
 async def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
     conv = db.query(Conversation).filter(Conversation.id == conversation_id).first()
     if not conv:
@@ -2352,7 +2410,7 @@ async def list_scenarios():
     }
 
 
-@app.post("/api/scenarios/{scenario_id}/apply")
+@app.post("/api/scenarios/{scenario_id}/apply", dependencies=[Depends(_auth.require_admin)])
 async def apply_scenario(scenario_id: str, db: Session = Depends(get_db)):
     """Apply a scenario: update AppConfig branding/persona and replace demo prompts."""
     scenario = get_scenario(scenario_id)

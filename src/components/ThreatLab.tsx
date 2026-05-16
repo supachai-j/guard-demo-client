@@ -127,18 +127,32 @@ const AuditPanel: React.FC = () => {
           </label>
         </div>
         <div className="flex gap-2">
-          <a
-            href={apiService.exportAuditCsvUrl()}
+          <button
+            onClick={async () => {
+              const blob = await apiService.downloadAuditCsv();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url; a.download = `audit_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'_')}.csv`;
+              document.body.appendChild(a); a.click(); a.remove();
+              URL.revokeObjectURL(url);
+            }}
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700"
           >
             <Download className="w-4 h-4" /> Export CSV
-          </a>
-          <a
-            href={apiService.exportAuditPdfUrl()}
+          </button>
+          <button
+            onClick={async () => {
+              const blob = await apiService.downloadAuditPdf();
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url; a.download = `audit_report_${new Date().toISOString().slice(0,19).replace(/[:T]/g,'_')}.pdf`;
+              document.body.appendChild(a); a.click(); a.remove();
+              URL.revokeObjectURL(url);
+            }}
             className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700"
           >
             <Download className="w-4 h-4" /> Export PDF
-          </a>
+          </button>
           <button onClick={clear} className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-red-600 text-white hover:bg-red-700">
             <Trash2 className="w-4 h-4" /> Clear
           </button>
