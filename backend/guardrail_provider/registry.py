@@ -12,6 +12,7 @@ from .base import GuardrailProvider
 from .bedrock_provider import BedrockGuardrailsProvider
 from .lakera_provider import LakeraProvider
 from .openai_moderation_provider import OpenAIModerationProvider
+from .palo_alto_provider import PaloAltoAirsProvider
 
 
 GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
@@ -19,6 +20,7 @@ GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
     OpenAIModerationProvider.id: OpenAIModerationProvider(),
     BedrockGuardrailsProvider.id: BedrockGuardrailsProvider(),
     AzureContentSafetyProvider.id: AzureContentSafetyProvider(),
+    PaloAltoAirsProvider.id: PaloAltoAirsProvider(),
 }
 
 
@@ -80,6 +82,15 @@ _PROVIDER_UI_FIELDS: Dict[str, Dict[str, Any]] = {
         ],
         "docs_url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/",
         "summary": "Calls text:analyze (Hate/SelfHarm/Sexual/Violence severity 0-6) + text:shieldPrompt (user-prompt + document injection) in parallel.",
+    },
+    "palo_alto_airs": {
+        "fields": [
+            {"name": "palo_alto_api_key", "label": "AIRS API Token (x-pan-token)", "type": "password", "placeholder": "your AIRS API token"},
+            {"name": "palo_alto_profile_name", "label": "AI Security Profile name", "type": "text", "placeholder": "e.g. default-ai-profile"},
+            {"name": "palo_alto_host", "label": "AIRS Host (region)", "type": "text", "placeholder": "service.api.aisecurity.paloaltonetworks.com"},
+        ],
+        "docs_url": "https://pan.dev/prisma-airs/api/airuntimesecurity/",
+        "summary": "Calls POST /v1/scan/sync/request. Detects prompt injection, DLP, URL cats, toxic content, malicious code. Requires an AI security profile preconfigured in Strata Cloud Manager.",
     },
 }
 

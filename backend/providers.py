@@ -124,6 +124,21 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         "needs_key": False,  # some proxies allow empty bearer
         "models": [],  # fetched dynamically from /v1/models
     },
+    "portkey": {
+        "display_name": "Portkey (AI Gateway)",
+        "key_field": "portkey_api_key",
+        "base_url_field": None,
+        "default_base_url": "https://api.portkey.ai/v1",
+        # Portkey is OpenAI-compatible; model name is whatever the virtual key resolves to.
+        "litellm_prefix": "",
+        "needs_key": True,
+        "models": [
+            "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4",
+            "claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022", "claude-3-opus-20240229",
+            "gemini-1.5-pro", "gemini-1.5-flash",
+            "mixtral-8x7b-32768", "llama-3.1-70b-versatile", "llama-3.1-8b-instant",
+        ],
+    },
 }
 
 

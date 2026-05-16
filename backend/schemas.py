@@ -50,6 +50,11 @@ class AppConfigResponse(AppConfigBase):
     bedrock_secret_access_key: Optional[str] = None
     azure_content_safety_endpoint: Optional[str] = None
     azure_content_safety_key: Optional[str] = None
+    palo_alto_api_key: Optional[str] = None
+    palo_alto_profile_name: Optional[str] = None
+    palo_alto_host: Optional[str] = None
+    portkey_api_key: Optional[str] = None
+    portkey_virtual_key: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -79,6 +84,11 @@ class AppConfigUpdate(AppConfigBase):
     bedrock_secret_access_key: Optional[str] = None
     azure_content_safety_endpoint: Optional[str] = None
     azure_content_safety_key: Optional[str] = None
+    palo_alto_api_key: Optional[str] = None
+    palo_alto_profile_name: Optional[str] = None
+    palo_alto_host: Optional[str] = None
+    portkey_api_key: Optional[str] = None
+    portkey_virtual_key: Optional[str] = None
 
 
 # Chat schemas

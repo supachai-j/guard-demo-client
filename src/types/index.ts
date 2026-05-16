@@ -39,6 +39,12 @@ export interface AppConfig {
   bedrock_secret_access_key?: string;
   azure_content_safety_endpoint?: string;
   azure_content_safety_key?: string;
+  palo_alto_api_key?: string;
+  palo_alto_profile_name?: string;
+  palo_alto_host?: string;
+  // Portkey (LLM gateway)
+  portkey_api_key?: string;
+  portkey_virtual_key?: string;
   created_at: string;
   updated_at: string;
 }
@@ -82,6 +88,12 @@ export interface AppConfigUpdate {
   bedrock_secret_access_key?: string;
   azure_content_safety_endpoint?: string;
   azure_content_safety_key?: string;
+  palo_alto_api_key?: string;
+  palo_alto_profile_name?: string;
+  palo_alto_host?: string;
+  // Portkey (LLM gateway)
+  portkey_api_key?: string;
+  portkey_virtual_key?: string;
 }
 
 // Guardrail provider catalog (GET /api/guardrail-providers)

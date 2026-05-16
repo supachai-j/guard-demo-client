@@ -174,6 +174,19 @@ def _build_litellm_kwargs(
             kwargs["extra_body"] = extra_body
         # Force OpenAI-compatible custom provider so LiteLLM proxies through correctly.
         kwargs["custom_llm_provider"] = "openai"
+    elif pid == "portkey":
+        # Portkey is OpenAI-compatible; auth via x-portkey-api-key + optional virtual key.
+        kwargs["api_base"] = "https://api.portkey.ai/v1"
+        extra_headers: Dict[str, Any] = {
+            "x-portkey-api-key": api_key or "",
+        }
+        virtual_key = getattr(cfg, "portkey_virtual_key", None)
+        if virtual_key:
+            extra_headers["x-portkey-virtual-key"] = virtual_key
+        kwargs["extra_headers"] = extra_headers
+        # Portkey accepts the OpenAI-compat path; the api_key arg above is the
+        # Bearer token Portkey ignores when x-portkey-api-key header is present.
+        kwargs["custom_llm_provider"] = "openai"
     return kwargs
 
 

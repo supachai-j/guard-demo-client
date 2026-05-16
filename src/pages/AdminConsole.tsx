@@ -343,6 +343,11 @@ const AdminConsole: React.FC = () => {
         bedrock_secret_access_key: updates.bedrock_secret_access_key ?? config.bedrock_secret_access_key,
         azure_content_safety_endpoint: updates.azure_content_safety_endpoint ?? config.azure_content_safety_endpoint,
         azure_content_safety_key: updates.azure_content_safety_key ?? config.azure_content_safety_key,
+        palo_alto_api_key: updates.palo_alto_api_key ?? config.palo_alto_api_key,
+        palo_alto_profile_name: updates.palo_alto_profile_name ?? config.palo_alto_profile_name,
+        palo_alto_host: updates.palo_alto_host ?? config.palo_alto_host,
+        portkey_api_key: updates.portkey_api_key ?? config.portkey_api_key,
+        portkey_virtual_key: updates.portkey_virtual_key ?? config.portkey_virtual_key,
       };
 
       await apiService.updateConfig(updatedConfig);
@@ -1192,6 +1197,24 @@ const AdminConsole: React.FC = () => {
                             placeholder={activeProvider?.default_base_url || ''}
                             className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                           />
+                        </div>
+                      )}
+
+                      {activeProviderId === 'portkey' && (
+                        <div className="mb-4">
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Portkey virtual key (optional)
+                          </label>
+                          <input
+                            type="text"
+                            value={config.portkey_virtual_key || ''}
+                            onChange={(e) => handleConfigUpdate({ portkey_virtual_key: e.target.value })}
+                            placeholder="vk-..."
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                          />
+                          <p className="text-xs text-gray-500 mt-1">
+                            Portkey&apos;s virtual key abstracts the upstream provider (OpenAI/Anthropic/etc.). Leave empty if your Portkey config routes by other means.
+                          </p>
                         </div>
                       )}
 

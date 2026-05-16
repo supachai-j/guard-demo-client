@@ -55,6 +55,13 @@ class AppConfig(Base):
     # Azure AI Content Safety
     azure_content_safety_endpoint = Column(String, nullable=True)
     azure_content_safety_key = Column(String, nullable=True)
+    # Palo Alto Prisma AIRS
+    palo_alto_api_key = Column(String, nullable=True)
+    palo_alto_profile_name = Column(String, nullable=True)
+    palo_alto_host = Column(String, nullable=True)
+    # Portkey (LLM gateway — used when llm_provider="portkey")
+    portkey_api_key = Column(String, nullable=True)
+    portkey_virtual_key = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

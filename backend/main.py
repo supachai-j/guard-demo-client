@@ -183,6 +183,11 @@ def _migrate_app_config_guardrail_provider():
         "bedrock_secret_access_key": "VARCHAR",
         "azure_content_safety_endpoint": "VARCHAR",
         "azure_content_safety_key": "VARCHAR",
+        "palo_alto_api_key": "VARCHAR",
+        "palo_alto_profile_name": "VARCHAR",
+        "palo_alto_host": "VARCHAR",
+        "portkey_api_key": "VARCHAR",
+        "portkey_virtual_key": "VARCHAR",
     }
     with engine.connect() as conn:
         r = conn.execute(text("PRAGMA table_info(app_config)"))
