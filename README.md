@@ -23,13 +23,23 @@ LLM + guardrail integration, RAG capabilities, and MCP tools.
 - Per-provider key slots — switching providers does not require re-entering credentials
 - Catalog-driven UI — dropdowns auto-populate from `/api/providers` and `/api/guardrail-providers`
 
-### Threat Lab (Admin tab)
-- **Audit log** — every chat/guardrail call captured; CSV export for compliance demos
+### Threat Lab (Admin tab — 9 sub-panels)
+- **Audit log** — every chat/guardrail call captured; CSV + PDF export for compliance demos
+- **Cost** — per-provider token + spend dashboard (USD/M-token pricing table for 8 providers)
 - **Guardrail compare** — fan one prompt to every configured guardrail in parallel, show per-vendor verdict + latency
+- **Compare LLMs** — fan one prompt to N LLM providers in parallel (response + tokens + cost + latency)
 - **OWASP LLM Top 10 (2025) playbook** — 10-prompt suite scored against the active guardrail, aggregate detection rate
+- **Batch eval** — upload CSV of prompts (max 500), get per-prompt verdict matrix
+- **Health** — ping every configured LLM + guardrail, return up/down + latency
 - **Recordings** — capture a sequence of prompts and replay them through the current agent stack
-- **Lakera on vs off compare** — side-by-side response panes
-- **Image moderation** — `POST /api/moderation/image` with the active guardrail provider (Lakera / OpenAI Moderation / Azure)
+- **Webhook** — POST to a URL (Slack, PagerDuty, SOAR) on every flagged event; built-in test button
+- Plus from the landing page: **Lakera on vs off compare** modal (works for every guardrail provider) and **image moderation** via `POST /api/moderation/image`
+
+### Admin authentication
+- **JWT-based login** (`POST /api/auth/login`) — 12 h sessions; protect every mutating + sensitive admin endpoint
+- **Sign-in screen** at `/login` with default-credentials warning banner
+- **`GET /api/config` masks every credential** (`***`) for unauthenticated callers so anonymous visitors can't lift API keys via DevTools
+- Env config: `ADMIN_USER`, `ADMIN_PASSWORD`, `JWT_SECRET`, `ADMIN_TOKEN_TTL_HOURS` (fallback `admin`/`admin` + per-process random secret for dev)
 
 ## 🏗️ Architecture
 
@@ -48,6 +58,20 @@ LLM + guardrail integration, RAG capabilities, and MCP tools.
   or a self-hosted endpoint (Ollama / LiteLLM proxy)
 - **At least one Guardrail provider key (optional)** — Lakera, OpenAI Moderation (free, reuses your OpenAI key),
   AWS Bedrock, Azure AI Content Safety, Palo Alto Prisma AIRS, or Cloudflare Firewall for AI
+
+### Admin auth env vars (recommended for any non-localhost deployment)
+
+```bash
+# .env
+ADMIN_USER=your-admin-username
+ADMIN_PASSWORD=a-strong-password
+JWT_SECRET=$(openssl rand -hex 32)       # stable secret across restarts
+ADMIN_TOKEN_TTL_HOURS=12                 # optional override (default 12)
+```
+
+If `ADMIN_USER` / `ADMIN_PASSWORD` are unset the app falls back to `admin` / `admin`
+and prints a warning at startup; the login screen also shows a banner reminding
+the operator to set proper credentials before exposing the instance.
 
 ## 🛠️ Installation
 
@@ -183,16 +207,17 @@ Useful scripts:
 
 ### 1. Initial Setup
 
-1. Navigate to the Admin Console at http://localhost:3000/admin
-2. Go to the **Security** tab
-3. Pick your **LLM provider** from the dropdown and enter its API key
+1. Navigate to http://localhost:3000/admin — you'll be bounced to `/login`
+2. Sign in with `ADMIN_USER` / `ADMIN_PASSWORD` from `.env` (or `admin` / `admin` if you haven't set them yet — login screen will warn you)
+3. Go to the **Security** tab
+4. Pick your **LLM provider** from the dropdown and enter its API key
    (slots are kept per provider so you can pre-stage several and switch live)
-4. Pick your **Guardrail provider** and enter its credentials
+5. Pick your **Guardrail provider** and enter its credentials
    (Lakera, OpenAI Moderation, Bedrock, Azure Content Safety, Palo Alto AIRS, Cloudflare Firewall for AI)
-5. If using LiteLLM proxy + Lakera guardrails, set guardrail names in Admin → Security to match `litellm/config.yaml`:
+6. If using LiteLLM proxy + Lakera guardrails, set guardrail names in Admin → Security to match `litellm/config.yaml`:
    - blocking: `lakera-guard-block`
    - monitor: `lakera-guard-monitor`
-6. (Optional) Open the **Threat Lab** tab for the audit log, guardrail compare matrix, OWASP playbook runner, and recordings
+7. (Optional) Open the **Threat Lab** tab for the 9-panel suite: audit log + cost dashboard + guardrail compare + LLM compare + OWASP playbook + batch eval + provider health + recordings + webhook config
 
 ### 1b. One-click demo personas
 
@@ -253,13 +278,20 @@ In the **Demo Prompts** tab:
 
 ## 🔧 API Endpoints
 
-All API routes are under the `/api` prefix.
+All API routes are under the `/api` prefix. Endpoints marked **🔒** require a
+valid Bearer token from `POST /api/auth/login`.
+
+### Auth
+- `GET /api/auth/status` — Public — is admin auth enabled, default-creds warning
+- `POST /api/auth/login` — Public — `{ username, password }` → `{ access_token, expires_at, user }`
+- `GET /api/auth/me` — 🔒 Current session info
+- `POST /api/auth/logout` — 🔒 No-op server side; client drops token
 
 ### Config
-- `GET /api/config` — Get current configuration
-- `PUT /api/config` — Update configuration
-- `GET /api/config/export` — Export config as a **ZIP** (query: `?include=appearance,llm,...&version=2`; omit include = safe default sections)
-- `POST /api/config/import` — Import config from an exported ZIP (merge by section)
+- `GET /api/config` — Public; **API keys masked** (`***`) unless caller is authenticated
+- `PUT /api/config` — 🔒 Update configuration
+- `GET /api/config/export` — 🔒 Export config as a **ZIP** (query: `?include=appearance,llm,...&version=2`)
+- `POST /api/config/import` — 🔒 Import config from an exported ZIP (merge by section)
 
 ### Catalogs (drive the Admin dropdowns)
 - `GET /api/providers` — Available LLM providers (9)
@@ -267,39 +299,49 @@ All API routes are under the `/api` prefix.
 - `GET /api/models` — Models for the active LLM provider (dynamic for proxy/Ollama, else static)
 
 ### Chat
-- `POST /api/chat` — Send a message; returns response + guardrail status + `conversation_id`
-- `POST /api/chat/stream` — Streaming SSE variant (events: `chunk`, `done`, `blocked`, `error`)
-- `POST /api/chat/compare` — Run the same prompt with Lakera on **and** off, return both panes
-- `POST /api/chat/compare-guardrails` — Fan one prompt to every configured guardrail in parallel
+- `POST /api/chat` — Public — Send a message; returns response + guardrail status + `conversation_id`
+- `POST /api/chat/stream` — Public — Streaming SSE variant (events: `chunk`, `done`, `blocked`, `error`)
+- `POST /api/chat/compare` — Public — Run the same prompt with guardrail on **and** off (works for every active guardrail), return both panes
+- `POST /api/chat/compare-guardrails` — 🔒 Fan one prompt to every configured guardrail in parallel
+- `POST /api/chat/compare-llms` — 🔒 Fan one prompt to N LLM providers in parallel; returns response + tokens + latency + cost per provider
 
 ### Conversations (multi-turn memory)
-- `GET /api/conversations`
-- `GET /api/conversations/{id}` — Full message history
-- `DELETE /api/conversations/{id}`
+- `GET /api/conversations` — 🔒
+- `GET /api/conversations/{id}` — 🔒 Full message history
+- `DELETE /api/conversations/{id}` — 🔒
 
 ### Audit log
-- `GET /api/audit?limit=200&flagged_only=true` — JSON entries
-- `GET /api/audit?format=csv` — CSV export attachment
-- `DELETE /api/audit` — Wipe entries (admin / demo-reset only)
+- `GET /api/audit?limit=200&flagged_only=true` — 🔒 JSON entries
+- `GET /api/audit?format=csv` — 🔒 CSV export attachment
+- `GET /api/audit/cost-summary` — 🔒 Per-provider tokens + estimated USD spend
+- `GET /api/audit/report.pdf` — 🔒 Printable PDF summary (reportlab)
+- `DELETE /api/audit` — 🔒 Wipe entries (admin / demo-reset only)
 
 ### Guardrails
-- `GET /api/lakera/last` — Last Lakera result (legacy frontend overlay)
-- `POST /api/moderation/image` — Scan an image with the active guardrail (`{ image_data_url }`)
+- `GET /api/lakera/last` — Public — Last Lakera result (legacy frontend overlay)
+- `POST /api/moderation/image` — 🔒 Scan an image with the active guardrail (`{ image_data_url }`)
+- `GET /api/health/providers` — 🔒 Ping every configured LLM + guardrail, return up/down + latency
 
 ### Playbooks (security suites)
-- `GET /api/playbooks` — Catalog (currently OWASP LLM Top 10 2025)
-- `POST /api/playbooks/{id}/run` — Score every prompt through the active guardrail
+- `GET /api/playbooks` — Public — Catalog (currently OWASP LLM Top 10 2025)
+- `POST /api/playbooks/{id}/run` — 🔒 Score every prompt through the active guardrail
+
+### Batch eval
+- `POST /api/batch/run` — 🔒 Upload CSV of prompts (column `prompt` or one-per-line, max 500); return verdict matrix
 
 ### Recordings (demo replay)
-- `GET /api/recordings` — List
-- `POST /api/recordings` — Save `{ name, events }`
-- `GET /api/recordings/{id}` — Full payload
-- `POST /api/recordings/{id}/replay` — Re-run every prompt through the current agent
-- `DELETE /api/recordings/{id}`
+- `GET /api/recordings` — 🔒 List
+- `POST /api/recordings` — 🔒 Save `{ name, events }`
+- `GET /api/recordings/{id}` — 🔒 Full payload
+- `POST /api/recordings/{id}/replay` — 🔒 Re-run every prompt through the current agent
+- `DELETE /api/recordings/{id}` — 🔒
+
+### Webhooks
+- `POST /api/webhook/test` — 🔒 Fire a `guardrail.test` event to a URL to verify integration; the saved `webhook_url` is fired automatically on every `guardrail.flagged` event
 
 ### Scenarios (one-click company switcher)
-- `GET /api/scenarios` — List previews
-- `POST /api/scenarios/{id}/apply` — Apply branding + prompts
+- `GET /api/scenarios` — Public — List previews
+- `POST /api/scenarios/{id}/apply` — 🔒 Apply branding + prompts
 
 ### RAG
 - `POST /api/rag/upload` — Upload documents
@@ -307,19 +349,19 @@ All API routes are under the `/api` prefix.
 - `GET /api/rag/search` — Search stored content
 
 ### Tools
-- `GET /api/tools` — List tools
-- `POST /api/tools` — Create tool
-- `PUT /api/tools/{id}` — Update tool
-- `DELETE /api/tools/{id}` — Delete tool
-- `POST /api/tools/test/{id}` — Test tool
+- `GET /api/tools` — Public — List tools (used by chat tool manifest)
+- `POST /api/tools` — 🔒 Create tool
+- `PUT /api/tools/{id}` — 🔒 Update tool
+- `DELETE /api/tools/{id}` — 🔒 Delete tool
+- `POST /api/tools/test/{id}` — 🔒 Test tool
 
 ### Demo Prompts
-- `GET /api/demo-prompts` — List demo prompts
-- `GET /api/demo-prompts/search` — Search with autocomplete suggestions
-- `POST /api/demo-prompts` — Create
-- `PUT /api/demo-prompts/{id}` — Update
-- `DELETE /api/demo-prompts/{id}` — Delete
-- `POST /api/demo-prompts/{id}/use` — Track usage
+- `GET /api/demo-prompts` — Public — List demo prompts (chat widget reads this)
+- `GET /api/demo-prompts/search` — Public — Search with autocomplete suggestions
+- `POST /api/demo-prompts` — 🔒 Create
+- `PUT /api/demo-prompts/{id}` — 🔒 Update
+- `DELETE /api/demo-prompts/{id}` — 🔒 Delete
+- `POST /api/demo-prompts/{id}/use` — Public — Track usage (called from chat widget)
 
 ## 📁 Project Structure
 
@@ -334,7 +376,10 @@ guard-demo-client/
 │   ├── agent.py                   # ReAct agent (pre-guard → RAG → tools → LLM → post-guard)
 │   ├── llm_client.py              # LiteLLM dispatch for all 9 providers + SSE streaming
 │   ├── providers.py               # LLM provider catalog (OpenAI/Anthropic/Google/...)
-│   ├── audit.py                   # Audit log writer + CSV export
+│   ├── auth.py                    # JWT login + require_admin dependency
+│   ├── costs.py                   # Per-provider pricing table + cost estimator
+│   ├── webhooks.py                # Outbound webhook on guardrail.flagged events
+│   ├── audit.py                   # Audit log writer + CSV + token/cost capture
 │   ├── playbooks.py               # OWASP LLM Top 10 (2025) suite
 │   ├── scenarios.py               # 4 one-click demo company personas
 │   ├── rag.py                     # RAG service, ChromaDB
@@ -352,16 +397,19 @@ guard-demo-client/
 ├── src/                            # React frontend
 │   ├── components/
 │   │   ├── ChatWidget.tsx          # Chat + stream toggle + conversation_id threading
-│   │   ├── ThreatLab.tsx           # Admin tab: audit / compare / OWASP / recordings
-│   │   ├── CompareDialog.tsx       # Lakera-on vs Lakera-off side-by-side
+│   │   ├── ThreatLab.tsx           # Admin tab: 9 sub-panels (audit/cost/compare/.../webhook)
+│   │   ├── CompareDialog.tsx       # Active-guardrail-on vs off side-by-side
 │   │   ├── ScenarioSwitcher.tsx    # One-click company logo bar
 │   │   ├── UIToggles.tsx           # EN/TH + Light/Dark switches
 │   │   ├── LakeraOverlay.tsx       # Per-detector verdict panel
 │   │   ├── DemoPromptManager.tsx
 │   │   ├── ToolManager.tsx
 │   │   └── RagManagement.tsx
-│   ├── pages/                      # AdminConsole, LandingPage
-│   ├── services/api.ts             # Typed REST + SSE iterator
+│   ├── auth/
+│   │   ├── AuthContext.tsx         # JWT token storage + login/logout helpers
+│   │   └── ProtectedRoute.tsx      # Wraps /admin; redirects to /login when no token
+│   ├── pages/                      # AdminConsole, LandingPage, Login
+│   ├── services/api.ts             # Typed REST + SSE iterator + auto Bearer header
 │   ├── i18n/                       # EN/TH dictionaries + UIContext
 │   └── types/
 ├── data/
@@ -430,9 +478,12 @@ guard-demo-client/
 
 ## 🔒 Security Features
 
-- API key masking in UI
+- **JWT admin auth** with login screen — protects every mutating + sensitive endpoint
+- **API key masking on public reads** — `GET /api/config` returns `"***"` for every credential field unless the caller presents a valid Bearer token
+- **bcrypt password hashing** + per-process JWT secret fallback (override via `JWT_SECRET` env)
+- **Audit log + webhook** — every flagged guardrail event captured and optionally POSTed to a customer-configured URL (Slack / PagerDuty / SOAR)
+- Content moderation via any of 6 guardrail providers (Lakera / OpenAI Moderation / Bedrock / Azure / Palo Alto AIRS / Cloudflare Firewall for AI)
 - Secure file upload validation
-- Content moderation via Lakera
 - Input sanitization
 - CORS configuration
 
