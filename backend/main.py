@@ -19,6 +19,7 @@ from . import lakera, llm_client, rag
 from .agent import AgentRequest, run_agent
 from .database import engine, get_db
 from .models import AppConfig, Base, DemoPrompt, MCPToolCapabilities, RagSource, Tool
+from .guardrail_provider import list_providers_for_ui as list_guardrail_providers_for_ui
 from .providers import list_providers_for_ui
 from .scenarios import SCENARIOS, get_scenario
 from .schemas import (
@@ -169,6 +170,39 @@ def _migrate_app_config_multi_provider():
 
 
 _migrate_app_config_multi_provider()
+
+
+def _migrate_app_config_guardrail_provider():
+    """Add multi-guardrail-provider columns + backfill default to 'lakera'."""
+    new_columns = {
+        "guardrail_provider": "VARCHAR",
+        "bedrock_guardrail_id": "VARCHAR",
+        "bedrock_guardrail_version": "VARCHAR",
+        "bedrock_region": "VARCHAR",
+        "bedrock_access_key_id": "VARCHAR",
+        "bedrock_secret_access_key": "VARCHAR",
+    }
+    with engine.connect() as conn:
+        r = conn.execute(text("PRAGMA table_info(app_config)"))
+        columns = [row[1] for row in r.fetchall()]
+        for name, col_type in new_columns.items():
+            if name not in columns:
+                conn.execute(text(f"ALTER TABLE app_config ADD COLUMN {name} {col_type}"))
+                conn.commit()
+        # Default existing rows to "lakera" so they keep current behavior.
+        conn.execute(
+            text(
+                """
+                UPDATE app_config
+                SET guardrail_provider = 'lakera'
+                WHERE guardrail_provider IS NULL OR guardrail_provider = ''
+                """
+            )
+        )
+        conn.commit()
+
+
+_migrate_app_config_guardrail_provider()
 
 app = FastAPI(title="Agentic Demo API", description="Backend API for the Agentic Demo application", version="1.0.0")
 
@@ -1306,6 +1340,14 @@ async def get_available_models(db: Session = Depends(get_db)):
 async def get_providers():
     """Catalog of supported LLM providers for the Admin Console dropdown."""
     return {"providers": list_providers_for_ui()}
+
+
+@app.get("/api/guardrail-providers")
+async def get_guardrail_providers():
+    """Catalog of supported guardrail providers (Lakera, OpenAI Moderation,
+    Bedrock Guardrails, …) plus the per-provider AppConfig fields each one
+    needs."""
+    return {"providers": list_guardrail_providers_for_ui()}
 
 
 # Scenario endpoints — one-click demo company switcher on the Landing page

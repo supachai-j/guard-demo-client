@@ -30,6 +30,13 @@ export interface AppConfig {
   groq_api_key?: string;
   together_api_key?: string;
   ollama_base_url?: string;
+  // Multi-guardrail
+  guardrail_provider?: string;
+  bedrock_guardrail_id?: string;
+  bedrock_guardrail_version?: string;
+  bedrock_region?: string;
+  bedrock_access_key_id?: string;
+  bedrock_secret_access_key?: string;
   created_at: string;
   updated_at: string;
 }
@@ -64,6 +71,29 @@ export interface AppConfigUpdate {
   groq_api_key?: string;
   together_api_key?: string;
   ollama_base_url?: string;
+  // Multi-guardrail
+  guardrail_provider?: string;
+  bedrock_guardrail_id?: string;
+  bedrock_guardrail_version?: string;
+  bedrock_region?: string;
+  bedrock_access_key_id?: string;
+  bedrock_secret_access_key?: string;
+}
+
+// Guardrail provider catalog (GET /api/guardrail-providers)
+export interface GuardrailProviderField {
+  name: string;
+  label: string;
+  type: 'text' | 'password';
+  placeholder?: string;
+}
+
+export interface GuardrailProviderInfo {
+  id: string;
+  display_name: string;
+  fields: GuardrailProviderField[];
+  docs_url?: string | null;
+  summary?: string | null;
 }
 
 // Multi-provider catalog (GET /api/providers)

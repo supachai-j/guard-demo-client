@@ -41,6 +41,13 @@ class AppConfigResponse(AppConfigBase):
     groq_api_key: Optional[str] = None
     together_api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
+    # Multi-guardrail fields
+    guardrail_provider: Optional[str] = None
+    bedrock_guardrail_id: Optional[str] = None
+    bedrock_guardrail_version: Optional[str] = None
+    bedrock_region: Optional[str] = None
+    bedrock_access_key_id: Optional[str] = None
+    bedrock_secret_access_key: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -61,6 +68,13 @@ class AppConfigUpdate(AppConfigBase):
     groq_api_key: Optional[str] = None
     together_api_key: Optional[str] = None
     ollama_base_url: Optional[str] = None
+    # Multi-guardrail fields
+    guardrail_provider: Optional[str] = None
+    bedrock_guardrail_id: Optional[str] = None
+    bedrock_guardrail_version: Optional[str] = None
+    bedrock_region: Optional[str] = None
+    bedrock_access_key_id: Optional[str] = None
+    bedrock_secret_access_key: Optional[str] = None
 
 
 # Chat schemas

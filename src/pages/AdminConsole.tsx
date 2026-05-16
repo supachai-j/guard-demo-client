@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowLeft, Download, Eye, EyeOff, ChevronDown, ChevronRight } from 'lucide-react';
-import { AppConfig, AppConfigUpdate, ProviderInfo } from '../types';
+import { AppConfig, AppConfigUpdate, ProviderInfo, GuardrailProviderInfo } from '../types';
 import { apiService } from '../services/api';
 import UploadDropzone from '../components/UploadDropzone';
 import ToolManager from '../components/ToolManager';
@@ -23,8 +23,9 @@ const AdminConsole: React.FC = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [showProviderKey, setShowProviderKey] = useState(false);
-  const [showLakeraKey, setShowLakeraKey] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [guardrailProviders, setGuardrailProviders] = useState<GuardrailProviderInfo[]>([]);
+  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
   const [showMCPInstructions, setShowMCPInstructions] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [ragScanningNotificationCount, setRagScanningNotificationCount] = useState<number>(0);
@@ -59,6 +60,12 @@ const AdminConsole: React.FC = () => {
       setProviders(providers);
     } catch (error) {
       console.error('Failed to load providers:', error);
+    }
+    try {
+      const { providers: gprov } = await apiService.getGuardrailProviders();
+      setGuardrailProviders(gprov);
+    } catch (error) {
+      console.error('Failed to load guardrail providers:', error);
     }
   };
  
@@ -328,6 +335,12 @@ const AdminConsole: React.FC = () => {
         groq_api_key: updates.groq_api_key ?? config.groq_api_key,
         together_api_key: updates.together_api_key ?? config.together_api_key,
         ollama_base_url: updates.ollama_base_url ?? config.ollama_base_url,
+        guardrail_provider: updates.guardrail_provider ?? config.guardrail_provider,
+        bedrock_guardrail_id: updates.bedrock_guardrail_id ?? config.bedrock_guardrail_id,
+        bedrock_guardrail_version: updates.bedrock_guardrail_version ?? config.bedrock_guardrail_version,
+        bedrock_region: updates.bedrock_region ?? config.bedrock_region,
+        bedrock_access_key_id: updates.bedrock_access_key_id ?? config.bedrock_access_key_id,
+        bedrock_secret_access_key: updates.bedrock_secret_access_key ?? config.bedrock_secret_access_key,
       };
 
       await apiService.updateConfig(updatedConfig);
@@ -1256,46 +1269,87 @@ const AdminConsole: React.FC = () => {
                     </div>
                   </div>
                 )}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Lakera API Key
-                  </label>
-                  <div className="relative">
-                    <input
-                      type={showLakeraKey ? "text" : "password"}
-                      value={config.lakera_api_key || ""}
-                      onChange={(e) => handleConfigUpdate({ lakera_api_key: e.target.value })}
-                      placeholder="lk-..."
-                      className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowLakeraKey(!showLakeraKey)}
-                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                    >
-                      {showLakeraKey ? (
-                        <EyeOff className="h-4 w-4" />
-                      ) : (
-                        <Eye className="h-4 w-4" />
+                {/* Guardrail provider selector + per-provider config */}
+                {(() => {
+                  const activeGuardrailId = config.guardrail_provider || 'lakera';
+                  const activeProvider = guardrailProviders.find((p) => p.id === activeGuardrailId);
+                  return (
+                    <div className="space-y-4 pt-4 border-t border-gray-200">
+                      <div>
+                        <label className="block text-sm font-medium text-gray-700 mb-2">
+                          Guardrail provider
+                        </label>
+                        <select
+                          value={activeGuardrailId}
+                          onChange={(e) => handleConfigUpdate({ guardrail_provider: e.target.value })}
+                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                        >
+                          {guardrailProviders.length === 0 ? (
+                            <option value={activeGuardrailId}>{activeGuardrailId}</option>
+                          ) : (
+                            guardrailProviders.map((p) => (
+                              <option key={p.id} value={p.id}>{p.display_name}</option>
+                            ))
+                          )}
+                        </select>
+                        {activeProvider?.summary && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            {activeProvider.summary}
+                            {activeProvider.docs_url && (
+                              <>
+                                {' · '}
+                                <a href={activeProvider.docs_url} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
+                                  docs ↗
+                                </a>
+                              </>
+                            )}
+                          </p>
+                        )}
+                      </div>
+
+                      {/* Per-provider fields driven by /api/guardrail-providers catalog */}
+                      {activeProvider?.fields.map((field) => {
+                        const key = field.name as keyof AppConfig;
+                        const value = (config[key] as string | undefined) || '';
+                        const isSecret = field.type === 'password';
+                        const revealed = revealedSecrets[field.name] ?? false;
+                        return (
+                          <div key={field.name}>
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              {field.label}
+                            </label>
+                            <div className="relative">
+                              <input
+                                type={isSecret && !revealed ? 'password' : 'text'}
+                                value={value}
+                                onChange={(e) => handleConfigUpdate({ [field.name]: e.target.value } as any)}
+                                placeholder={field.placeholder || ''}
+                                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                              />
+                              {isSecret && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRevealedSecrets((prev) => ({ ...prev, [field.name]: !prev[field.name] }))
+                                  }
+                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
+                                >
+                                  {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {activeProvider && activeProvider.fields.length === 0 && (
+                        <p className="text-xs text-gray-500 italic">
+                          This provider reuses credentials configured above (no extra fields needed).
+                        </p>
                       )}
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    Lakera Project ID (Optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={config.lakera_project_id || ''}
-                    onChange={(e) => handleConfigUpdate({ lakera_project_id: e.target.value })}
-                    placeholder="project-8541012967"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                  />
-                  <p className="text-xs text-gray-500 mt-1">
-                    Optional: Include a project ID for Lakera Guard requests
-                  </p>
-                </div>
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           )}

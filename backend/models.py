@@ -44,6 +44,14 @@ class AppConfig(Base):
     rag_lakera_project_id = Column(String, nullable=True)
     # UI theming
     theme = Column(String, nullable=True, default="blue")
+    # Guardrail provider (Lakera / OpenAI Moderation / Bedrock / …)
+    guardrail_provider = Column(String, nullable=True, default="lakera")
+    # AWS Bedrock Guardrails — requires a guardrail pre-created in the Bedrock console
+    bedrock_guardrail_id = Column(String, nullable=True)
+    bedrock_guardrail_version = Column(String, nullable=True)
+    bedrock_region = Column(String, nullable=True)
+    bedrock_access_key_id = Column(String, nullable=True)
+    bedrock_secret_access_key = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from . import lakera, llm_client, rag, toolhive
+from .guardrail_provider import active_provider_id, resolve_provider
 from .models import AppConfig
 
 
@@ -23,11 +24,23 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
     """
     Main orchestrator function that coordinates RAG, tools, and OpenAI
     """
-    # Step 0: Check user input with Lakera if enabled (pre-response check)
+    # Step 0: Check user input with the active guardrail provider (pre-response check).
+    # `lakera_enabled` is the master "guardrail enabled" toggle (legacy name);
+    # `lakera_blocking_mode` is the "block vs monitor" switch — they apply to ALL providers.
     lakera_api_key = cfg.lakera_api_key if cfg.lakera_enabled else None
     lakera_project_id = cfg.lakera_project_id if cfg.lakera_enabled else None
     lakera_blocking_mode = cfg.lakera_blocking_mode if cfg.lakera_enabled else False
-    use_litellm_guardrails = bool(getattr(cfg, "use_litellm", False) and cfg.lakera_enabled and cfg.lakera_api_key)
+    guardrail_provider_id = active_provider_id(cfg) if cfg.lakera_enabled else None
+    active_guardrail = resolve_provider(cfg) if cfg.lakera_enabled else None
+    # LiteLLM-native guardrails only engage when (a) using the LiteLLM proxy AND
+    # (b) the active guardrail provider is still Lakera — other providers don't
+    # have a corresponding LiteLLM-native equivalent in this codebase.
+    use_litellm_guardrails = bool(
+        getattr(cfg, "use_litellm", False)
+        and cfg.lakera_enabled
+        and cfg.lakera_api_key
+        and guardrail_provider_id == "lakera"
+    )
     litellm_guardrail_block = (
         (getattr(cfg, "litellm_guardrail_name", None) or "").strip() or "lakera-guard-block"
     )
@@ -45,34 +58,33 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
         else None
     )
 
-    if cfg.lakera_enabled and lakera_api_key and not use_litellm_guardrails:
-        print("🛡️ Checking user input with Lakera...")
-        # Prepare messages for Lakera (user only for pre-check, no system prompt)
-        lakera_messages = []
-        lakera_messages.append({"role": "user", "content": req.message})
+    if cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
+        provider_name = active_guardrail.display_name
+        print(f"🛡️ Checking user input with {provider_name}...")
+        # Pre-check messages: user only (system prompt added inside the provider if needed)
+        pre_check_messages = [{"role": "user", "content": req.message}]
 
-        lakera_result = await lakera.check_interaction(
-            messages=lakera_messages,
+        lakera_result = await active_guardrail.check_interaction(
+            messages=pre_check_messages,
+            cfg=cfg,
             meta={"session_id": req.session_id} if req.session_id else None,
-            api_key=lakera_api_key,
-            project_id=lakera_project_id,
             system_prompt=cfg.system_prompt,
         )
 
         if lakera_result and lakera_result.get("flagged"):
-            print(f"⚠️ User input flagged by Lakera: {lakera_result.get('breakdown', [])}")
+            print(f"⚠️ User input flagged by {provider_name}: {lakera_result.get('breakdown', [])}")
             if lakera_blocking_mode:
-                print("🚫 User input blocked due to Lakera moderation (blocking mode enabled)")
+                print(f"🚫 User input blocked by {provider_name} (blocking mode enabled)")
                 return AgentResult(
-                    response="This content has been moderated by Lakera and found to be in breach of our security policies. Please contact support if you believe this is an error.",
+                    response="This content has been moderated and found to be in breach of our security policies. Please contact support if you believe this is an error.",
                     citations=[],
                     tool_traces=[],
                     lakera_status=lakera_result,
                 )
             else:
-                print("📝 User input flagged but allowed through (blocking mode disabled)")
+                print(f"📝 User input flagged by {provider_name} but allowed through (monitor mode)")
         else:
-            print("✅ User input passed Lakera moderation")
+            print(f"✅ User input passed {provider_name} moderation")
 
     # Step 1: Get context from RAG
     context = await rag.retrieve(req.message)
@@ -196,32 +208,32 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session) -> AgentResu
             # No tool calls, use the original response
             response_text = assistant_message["content"]
 
-        # Step 5: Check assistant response with Lakera if enabled (post-response check)
+        # Step 5: Check assistant response with the active guardrail (post-response check)
         lakera_status = None
-        if cfg.lakera_enabled and cfg.lakera_api_key and not use_litellm_guardrails:
-            print("🛡️ Checking assistant response with Lakera...")
-            # Prepare messages for Lakera (user + assistant only, no system prompt)
-            lakera_messages = []
-            lakera_messages.append({"role": "user", "content": req.message})
-            lakera_messages.append({"role": "assistant", "content": response_text})
+        if cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
+            provider_name = active_guardrail.display_name
+            print(f"🛡️ Checking assistant response with {provider_name}...")
+            post_messages = [
+                {"role": "user", "content": req.message},
+                {"role": "assistant", "content": response_text or ""},
+            ]
 
-            lakera_status = await lakera.check_interaction(
-                messages=lakera_messages,
+            lakera_status = await active_guardrail.check_interaction(
+                messages=post_messages,
+                cfg=cfg,
                 meta={"session_id": req.session_id} if req.session_id else None,
-                api_key=cfg.lakera_api_key,
-                project_id=cfg.lakera_project_id,
                 system_prompt=cfg.system_prompt,
             )
 
             if lakera_status and lakera_status.get("flagged"):
-                print(f"⚠️ Assistant response flagged by Lakera: {lakera_status.get('breakdown', [])}")
+                print(f"⚠️ Assistant response flagged by {provider_name}: {lakera_status.get('breakdown', [])}")
                 if lakera_blocking_mode:
-                    print("🚫 Assistant response blocked due to Lakera moderation (blocking mode enabled)")
-                    response_text = "This content has been moderated by Lakera and found to be in breach of our security policies. Please contact support if you believe this is an error."
+                    print(f"🚫 Assistant response blocked by {provider_name} (blocking mode)")
+                    response_text = "This content has been moderated and found to be in breach of our security policies. Please contact support if you believe this is an error."
                 else:
-                    print("📝 Assistant response flagged but allowed through (blocking mode disabled)")
+                    print(f"📝 Assistant response flagged by {provider_name} but allowed through (monitor mode)")
             else:
-                print("✅ Assistant response passed Lakera moderation")
+                print(f"✅ Assistant response passed {provider_name} moderation")
         elif (
             cfg.lakera_enabled
             and cfg.lakera_api_key

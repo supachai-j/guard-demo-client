@@ -231,6 +231,10 @@ class ApiService {
     return this.request<{ providers: import('../types').ProviderInfo[] }>('/providers');
   }
 
+  async getGuardrailProviders(): Promise<{ providers: import('../types').GuardrailProviderInfo[] }> {
+    return this.request<{ providers: import('../types').GuardrailProviderInfo[] }>('/guardrail-providers');
+  }
+
   // Scenario (one-click company switcher) endpoints
   async listScenarios(): Promise<{ scenarios: ScenarioPreview[] }> {
     return this.request<{ scenarios: ScenarioPreview[] }>('/scenarios');
