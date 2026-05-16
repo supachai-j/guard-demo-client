@@ -995,30 +995,48 @@ class _ConfigOverride:
 
 @app.post("/api/chat/compare")
 async def chat_compare(request: ChatRequest, db: Session = Depends(get_db)):
-    """Run the same prompt twice — once with Lakera Guard on, once off — and
-    return both results side-by-side. Used by the Landing-page comparison
-    modal to demo the value of guardrails in a single screen."""
+    """Run the same prompt twice — once with the active guardrail on, once
+    off — and return both results side-by-side. Works for every guardrail
+    provider (Lakera / OpenAI Moderation / Bedrock / Azure / Palo Alto AIRS
+    / Cloudflare Firewall for AI); the active one is whatever is selected
+    in Admin → Security. The response includes the provider id + display
+    name so the UI can label panes correctly."""
+    from .guardrail_provider import GUARDRAIL_PROVIDERS, active_provider_id, resolve_provider
+
     config = db.query(AppConfig).first()
     if not config:
         raise HTTPException(status_code=500, detail="No configuration found")
-    if not config.lakera_api_key:
+
+    pid = active_provider_id(config)
+    provider_obj = GUARDRAIL_PROVIDERS.get(pid)
+    if not resolve_provider(config):
+        name = provider_obj.display_name if provider_obj else pid
         raise HTTPException(
             status_code=400,
-            detail="Comparison requires a Lakera API key. Set it in Admin → Security.",
+            detail=f"Comparison requires the active guardrail provider ({name}) to be configured. "
+                   f"Set its credentials in Admin → Security, or switch the guardrail provider.",
         )
 
     _ensure_active_model_valid(config, db)
     agent_request = AgentRequest(message=request.message, session_id=request.session_id)
 
+    # `lakera_enabled` is the master "guardrail enabled" toggle (legacy field
+    # name kept for backwards-compat); flipping it disables every provider, not
+    # just Lakera.
     cfg_with = _ConfigOverride(config, lakera_enabled=True)
     cfg_without = _ConfigOverride(config, lakera_enabled=False)
 
-    result_with = await run_agent(agent_request, cfg_with, db)
-    result_without = await run_agent(agent_request, cfg_without, db)
+    # Don't pollute audit log / conversation history with the off-side run.
+    result_with = await run_agent(agent_request, cfg_with, db, persist=False)
+    result_without = await run_agent(agent_request, cfg_without, db, persist=False)
 
     return {
+        "guardrail_provider": pid,
+        "guardrail_display_name": provider_obj.display_name if provider_obj else pid,
         "with_guard": {
             "response": result_with.response,
+            # `lakera` key kept for frontend backwards-compat; payload is the
+            # active provider's Lakera-shaped status dict.
             "lakera": result_with.lakera_status,
             "tool_traces": result_with.tool_traces,
             "citations": result_with.citations,
