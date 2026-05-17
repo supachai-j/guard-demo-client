@@ -433,5 +433,17 @@ def get_models(config: Optional[AppConfig] = None) -> List[str]:
     return provider_static_models(pid) or STATIC_MODELS
 
 
+def ensure_active_model_valid(config: AppConfig, db) -> None:
+    """If the saved `openai_model` isn't in the active provider's model list,
+    swap it for the first valid option and persist. Called at the top of
+    every chat/replay handler so a provider switch doesn't leave the row
+    pointing at a model the new provider doesn't have."""
+    valid_models = get_models(config)
+    if valid_models and config.openai_model not in valid_models:
+        config.openai_model = valid_models[0]
+        db.commit()
+        db.refresh(config)
+
+
 # Silence noisy litellm logging by default (callers can override if they want)
 litellm.suppress_debug_info = True
