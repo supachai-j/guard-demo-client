@@ -8,9 +8,6 @@ import re
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-import chromadb
-from chromadb.config import Settings
-
 from . import llm_client
 from .database import get_db
 from .lakera import check_interaction
@@ -20,16 +17,52 @@ from .models import AppConfig, RagSource
 _last_rag_scanning_result: Optional[Dict[str, Any]] = None
 _rag_scanning_progress: Optional[Dict[str, Any]] = None
 
-# Initialize ChromaDB
+# Lazy ChromaDB init — importing chromadb pulls in onnxruntime which can
+# crash with SIGILL on CPUs missing AVX2 (e.g. some GH-actions runners).
+# Module-level `chroma_client` / `collection` are resolved on first access
+# via PEP 562 __getattr__, so smoke tests that never touch RAG don't load
+# the embedder at all.
 _chroma_export_path = "./data/chroma"
-chroma_client = chromadb.PersistentClient(
-    path=_chroma_export_path,
-    settings=Settings(
-        anonymized_telemetry=False,  # disables telemetry
-        allow_reset=True,
-    ),
-)
-collection = chroma_client.get_or_create_collection(name="agentic_demo", metadata={"hnsw:space": "cosine"})
+_chroma_client = None
+_chroma_collection = None
+
+
+def _init_chroma():
+    """Build (or rebuild) the module-level chroma client + collection."""
+    global _chroma_client, _chroma_collection
+    import chromadb
+    from chromadb.config import Settings
+
+    _chroma_client = chromadb.PersistentClient(
+        path=_chroma_export_path,
+        settings=Settings(anonymized_telemetry=False, allow_reset=True),
+    )
+    _chroma_collection = _chroma_client.get_or_create_collection(
+        name="agentic_demo", metadata={"hnsw:space": "cosine"}
+    )
+
+
+def _get_collection():
+    """Lazy accessor — initializes ChromaDB on first call."""
+    if _chroma_collection is None:
+        _init_chroma()
+    return _chroma_collection
+
+
+def _get_chroma_client():
+    if _chroma_client is None:
+        _init_chroma()
+    return _chroma_client
+
+
+def __getattr__(name):
+    """PEP 562 lazy resolution for external callers that still reference
+    `backend.rag.chroma_client` / `backend.rag.collection` directly."""
+    if name == "chroma_client":
+        return _get_chroma_client()
+    if name == "collection":
+        return _get_collection()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def get_chroma_export_path() -> str:
@@ -38,9 +71,14 @@ def get_chroma_export_path() -> str:
 
 
 def reinitialize_chromadb(path: Optional[str] = None):
-    """Reinitialize ChromaDB client and collection after import. On failure, leaves existing client unchanged.
-    path: directory to use (e.g. 'data/chroma_import' after import); if None, uses './data/chroma'."""
-    global chroma_client, collection, _chroma_export_path
+    """Reinitialize ChromaDB client and collection after import. On failure,
+    leaves existing client unchanged.
+    path: directory to use (e.g. 'data/chroma_import' after import); if None,
+    uses './data/chroma'."""
+    global _chroma_client, _chroma_collection, _chroma_export_path
+    import chromadb
+    from chromadb.config import Settings
+
     chroma_path = path if path else "./data/chroma"
     try:
         new_client = chromadb.PersistentClient(
@@ -50,15 +88,13 @@ def reinitialize_chromadb(path: Optional[str] = None):
             new_collection = new_client.get_collection(name="agentic_demo")
         except Exception:
             new_collection = new_client.create_collection(name="agentic_demo", metadata={"hnsw:space": "cosine"})
-        # Verify we can use it before replacing globals
-        new_collection.count()
-        chroma_client = new_client
-        collection = new_collection
+        new_collection.count()  # verify usable before replacing globals
+        _chroma_client = new_client
+        _chroma_collection = new_collection
         _chroma_export_path = chroma_path
         print("🔄 ChromaDB reinitialized successfully")
     except Exception as e:
         print(f"ℹ️ ChromaDB reinitialization skipped ({e}); new data will be used after application restart.")
-        # Do not overwrite chroma_client/collection so the app keeps using the previous client
 
 
 def chunk_text(text: str, chunk_size: int = 800, overlap: int = 200) -> List[str]:
@@ -335,7 +371,7 @@ async def retrieve(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
         query_embeddings = llm_client.get_embeddings([query])
 
         # Search in ChromaDB
-        results = collection.query(query_embeddings=query_embeddings, n_results=top_k)
+        results = _get_collection().query(query_embeddings=query_embeddings, n_results=top_k)
 
         documents = []
         if results["documents"] and results["documents"][0]:
@@ -362,7 +398,7 @@ async def retrieve(query: str, top_k: int = 5) -> List[Dict[str, Any]]:
             # For count queries, do a separate search specifically for summary chunks
             try:
                 # Get all documents and filter for summary chunks
-                all_docs = collection.get()
+                all_docs = _get_collection().get()
                 summary_chunks = []
 
                 for i, metadata in enumerate(all_docs["metadatas"]):
@@ -718,7 +754,7 @@ async def ingest_with_smart_chunking(
             combined_metadata.append(combined_meta)
 
         # Add to ChromaDB
-        collection.add(documents=chunks, embeddings=embeddings, ids=chunk_ids, metadatas=combined_metadata)
+        _get_collection().add(documents=chunks, embeddings=embeddings, ids=chunk_ids, metadatas=combined_metadata)
 
         # Save to database
         if db is None:
