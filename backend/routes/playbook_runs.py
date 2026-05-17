@@ -20,6 +20,12 @@ from ..models import AppConfig, Playbook, PlaybookRun
 
 router = APIRouter(prefix="/api/playbook-runs", tags=["playbook-runs"])
 
+# Concurrent calls per provider. Most managed guardrail providers throttle
+# free-tier accounts at ~60 req/min — bursting all 26 prompts in parallel
+# triggers 429s + silent null breakdowns. Cap at 5 simultaneous so a 26-prompt
+# playbook spreads over ~5 batches (~1-2s total at typical 200-400ms latency).
+SCAN_CONCURRENCY = 5
+
 
 def _summary(row: PlaybookRun) -> dict:
     return {
@@ -239,26 +245,31 @@ async def _run_playbook_against_providers(
             return not flagged
         return flagged
 
-    async def _scan_one(provider, item):
-        try:
-            status = await provider.check_interaction(
-                messages=[{"role": "user", "content": item["prompt"]}],
-                cfg=config,
-                meta=None,
-                system_prompt=config.system_prompt,
-            )
-            flagged = bool(status and status.get("flagged"))
-            return {
-                "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
-                "expected": item.get("expected"), "flagged": flagged,
-                "passed": _verdict(flagged, item.get("expected")),
-                "breakdown": (status or {}).get("breakdown") or [],
-            }
-        except Exception as e:
-            return {
-                "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
-                "expected": item.get("expected"), "flagged": False, "passed": False, "error": str(e),
-            }
+    async def _scan_one(provider, item, sem: asyncio.Semaphore):
+        async with sem:
+            try:
+                status = await provider.check_interaction(
+                    messages=[{"role": "user", "content": item["prompt"]}],
+                    cfg=config,
+                    meta=None,
+                    system_prompt=config.system_prompt,
+                )
+                flagged = bool(status and status.get("flagged"))
+                return {
+                    "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
+                    "expected": item.get("expected"), "flagged": flagged,
+                    "passed": _verdict(flagged, item.get("expected")),
+                    "breakdown": (status or {}).get("breakdown") or [],
+                    # Mark provider returning None (likely rate limit or
+                    # upstream failure that the provider swallowed) so the
+                    # aggregate can warn instead of silently scoring 0%.
+                    "null_status": status is None,
+                }
+            except Exception as e:
+                return {
+                    "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
+                    "expected": item.get("expected"), "flagged": False, "passed": False, "error": str(e),
+                }
 
     created_rows: List[PlaybookRun] = []
     errors: List[dict] = []
@@ -270,7 +281,19 @@ async def _run_playbook_against_providers(
         if not provider.is_configured(config):
             errors.append({"provider": pid, "error": f"provider '{pid}' not configured"})
             continue
-        results = await asyncio.gather(*[_scan_one(provider, p) for p in pb_dict["prompts"]])
+        # Throttle per-provider: SCAN_CONCURRENCY simultaneous calls max.
+        # Fresh semaphore per provider so providers don't starve each other.
+        sem = asyncio.Semaphore(SCAN_CONCURRENCY)
+        results = await asyncio.gather(*[_scan_one(provider, p, sem) for p in pb_dict["prompts"]])
+        # Surface "many null statuses" as a provider-level warning so the
+        # caller doesn't mistake a silent rate-limit for a clean 0% pass.
+        null_count = sum(1 for r in results if r.get("null_status"))
+        error_count = sum(1 for r in results if r.get("error"))
+        if null_count >= max(1, len(results) // 2) or error_count >= max(1, len(results) // 2):
+            errors.append({
+                "provider": pid,
+                "error": f"{null_count} null + {error_count} error out of {len(results)} prompts — likely rate-limited or upstream outage",
+            })
         detected = sum(1 for r in results if r.get("flagged"))
         passed = sum(1 for r in results if r.get("passed"))
         total = len(results)

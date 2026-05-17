@@ -183,37 +183,44 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
         # Treat both "blocked" and a missing expected as "should be flagged".
         return flagged
 
+    # Throttle to SCAN_CONCURRENCY simultaneous calls — same rationale as
+    # the matrix endpoint: free-tier providers 429 when bursting all
+    # prompts in parallel.
+    from .playbook_runs import SCAN_CONCURRENCY
+    sem = asyncio.Semaphore(SCAN_CONCURRENCY)
+
     async def _scan(item):
-        try:
-            status = await provider.check_interaction(
-                messages=[{"role": "user", "content": item["prompt"]}],
-                cfg=config,
-                meta=None,
-                system_prompt=config.system_prompt,
-            )
-            flagged = bool(status and status.get("flagged"))
-            return {
-                "id": item["id"],
-                "category": item["category"],
-                "prompt": item["prompt"],
-                "expected": item.get("expected"),
-                "flagged": flagged,
-                "passed": _verdict(flagged, item.get("expected")),
-                "breakdown": (status or {}).get("breakdown") or [],
-                "status": status,
-            }
-        except Exception as e:
-            return {
-                "id": item["id"],
-                "category": item["category"],
-                "prompt": item["prompt"],
-                "expected": item.get("expected"),
-                "flagged": False,
-                # Errors count as failures so the operator notices them in
-                # the dashboard instead of silently 100%-passing.
-                "passed": False,
-                "error": str(e),
-            }
+        async with sem:
+            try:
+                status = await provider.check_interaction(
+                    messages=[{"role": "user", "content": item["prompt"]}],
+                    cfg=config,
+                    meta=None,
+                    system_prompt=config.system_prompt,
+                )
+                flagged = bool(status and status.get("flagged"))
+                return {
+                    "id": item["id"],
+                    "category": item["category"],
+                    "prompt": item["prompt"],
+                    "expected": item.get("expected"),
+                    "flagged": flagged,
+                    "passed": _verdict(flagged, item.get("expected")),
+                    "breakdown": (status or {}).get("breakdown") or [],
+                    "status": status,
+                }
+            except Exception as e:
+                return {
+                    "id": item["id"],
+                    "category": item["category"],
+                    "prompt": item["prompt"],
+                    "expected": item.get("expected"),
+                    "flagged": False,
+                    # Errors count as failures so the operator notices them in
+                    # the dashboard instead of silently 100%-passing.
+                    "passed": False,
+                    "error": str(e),
+                }
 
     results = await asyncio.gather(*[_scan(p) for p in pb["prompts"]])
     detected = sum(1 for r in results if r.get("flagged"))
