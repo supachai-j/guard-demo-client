@@ -1607,11 +1607,193 @@ interface ProvidersTabProps {
   onActivate: (kind: 'llm' | 'guardrail', id: string) => Promise<void>;
 }
 
+// Per-provider field schemas — single source of truth for the EditProviderModal.
+// Adding a new provider requires extending PROVIDERS in backend/providers.py
+// (or backend/guardrail_provider/) AND adding an entry here, since the
+// modal renders inputs from this schema. Backend remains source of truth
+// for what's valid; this just drives the form.
+type ProviderFieldDef = {
+  field: string;          // AppConfig column name
+  label: string;
+  type: 'text' | 'password';
+  required?: boolean;
+  placeholder?: string;
+  help?: string;
+};
+
+const PROVIDER_FIELD_SCHEMAS: Record<string, ProviderFieldDef[]> = {
+  // LLM providers
+  openai: [{ field: 'openai_api_key', label: 'OpenAI API Key', type: 'password', required: true, placeholder: 'sk-...' }],
+  anthropic: [{ field: 'anthropic_api_key', label: 'Anthropic API Key', type: 'password', required: true, placeholder: 'sk-ant-...' }],
+  google: [{ field: 'google_api_key', label: 'Google AI API Key', type: 'password', required: true }],
+  mistral: [{ field: 'mistral_api_key', label: 'Mistral API Key', type: 'password', required: true }],
+  groq: [{ field: 'groq_api_key', label: 'Groq API Key', type: 'password', required: true }],
+  together: [{ field: 'together_api_key', label: 'Together AI API Key', type: 'password', required: true }],
+  openrouter: [{ field: 'openrouter_api_key', label: 'OpenRouter API Key', type: 'password', required: true }],
+  ollama: [{ field: 'ollama_base_url', label: 'Ollama Base URL', type: 'text', placeholder: 'http://localhost:11434', help: 'No key needed — set the local Ollama server address' }],
+  litellm_proxy: [
+    { field: 'litellm_virtual_key', label: 'LiteLLM Virtual Key', type: 'password', required: true },
+    { field: 'litellm_base_url', label: 'LiteLLM Base URL', type: 'text', required: true, placeholder: 'http://localhost:4000' },
+    { field: 'litellm_guardrail_name', label: 'Guardrail Name (block mode)', type: 'text', help: 'Optional — name of LiteLLM guardrail used in blocking mode' },
+    { field: 'litellm_guardrail_monitor_name', label: 'Guardrail Name (monitor mode)', type: 'text', help: 'Optional — name of LiteLLM guardrail used in monitor mode' },
+  ],
+  portkey: [
+    { field: 'portkey_api_key', label: 'Portkey API Key', type: 'password', required: true },
+    { field: 'portkey_virtual_key', label: 'Portkey Virtual Key', type: 'password' },
+    { field: 'portkey_base_url', label: 'Portkey Base URL', type: 'text', placeholder: 'https://api.portkey.ai/v1' },
+  ],
+  // Guardrail providers
+  lakera: [
+    { field: 'lakera_api_key', label: 'Lakera API Key', type: 'password', required: true },
+    { field: 'lakera_project_id', label: 'Lakera Project ID', type: 'text', required: true, placeholder: 'project-...' },
+  ],
+  openai_moderation: [
+    { field: 'openai_api_key', label: 'OpenAI API Key (shared with LLM provider)', type: 'password', required: true, help: 'OpenAI Moderation reuses the OpenAI key from the LLM section — editing here updates both' },
+  ],
+  bedrock: [
+    { field: 'bedrock_access_key_id', label: 'AWS Access Key ID', type: 'password', required: true },
+    { field: 'bedrock_secret_access_key', label: 'AWS Secret Access Key', type: 'password', required: true },
+    { field: 'bedrock_region', label: 'AWS Region', type: 'text', required: true, placeholder: 'us-east-1' },
+    { field: 'bedrock_guardrail_id', label: 'Guardrail ID', type: 'text', required: true },
+    { field: 'bedrock_guardrail_version', label: 'Guardrail Version', type: 'text', placeholder: 'DRAFT' },
+  ],
+  azure_content_safety: [
+    { field: 'azure_content_safety_endpoint', label: 'Endpoint URL', type: 'text', required: true, placeholder: 'https://X.cognitiveservices.azure.com' },
+    { field: 'azure_content_safety_key', label: 'API Key', type: 'password', required: true },
+  ],
+  palo_alto_airs: [
+    { field: 'palo_alto_api_key', label: 'Prisma AIRS API Key', type: 'password', required: true },
+    { field: 'palo_alto_profile_name', label: 'Profile Name', type: 'text', required: true, placeholder: 'test-profile' },
+    { field: 'palo_alto_host', label: 'Host URL', type: 'text', placeholder: 'https://service.api.aisecurity.paloaltonetworks.com', help: 'Optional — defaults to global endpoint' },
+  ],
+  cloudflare_firewall_ai: [
+    { field: 'cloudflare_account_id', label: 'Cloudflare Account ID', type: 'text', required: true },
+    { field: 'cloudflare_api_token', label: 'API Token', type: 'password', required: true },
+    { field: 'cloudflare_gateway_id', label: 'AI Gateway ID', type: 'text', placeholder: 'my-ai-gateway' },
+  ],
+};
+
+interface EditProviderModalProps {
+  provider: { id: string; display_name: string };
+  config: AppConfig;
+  locked: boolean;
+  onSave: (updates: Partial<AppConfigUpdate>) => Promise<void>;
+  onClose: () => void;
+}
+
+const EditProviderModal: React.FC<EditProviderModalProps> = ({ provider, config, locked, onSave, onClose }) => {
+  const schema = PROVIDER_FIELD_SCHEMAS[provider.id] || [];
+  // Snapshot of the current values so unsaved edits don't immediately mutate.
+  const initial: Record<string, string> = {};
+  for (const f of schema) initial[f.field] = ((config as any)[f.field] ?? '') as string;
+  const [values, setValues] = React.useState<Record<string, string>>(initial);
+  const [reveal, setReveal] = React.useState<Record<string, boolean>>({});
+  const [saving, setSaving] = React.useState(false);
+  const [err, setErr] = React.useState<string | null>(null);
+
+  const dirty = schema.some(f => values[f.field] !== initial[f.field]);
+
+  const save = async () => {
+    // Required-field guard
+    const missing = schema.filter(f => f.required && !(values[f.field] || '').trim()).map(f => f.label);
+    if (missing.length) {
+      setErr(`Required: ${missing.join(', ')}`);
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      // Only send fields that actually changed — keeps PUT /api/config diff
+      // small + plays well with the demo-safe lock's value-comparison logic.
+      const updates: any = {};
+      for (const f of schema) {
+        if (values[f.field] !== initial[f.field]) updates[f.field] = values[f.field];
+      }
+      await onSave(updates);
+      onClose();
+    } catch (e: any) {
+      setErr(String(e?.message || e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold text-gray-900 dark:text-slate-100">Edit {provider.display_name}</h3>
+            <div className="text-xs text-gray-500 dark:text-slate-400 font-mono mt-0.5">{provider.id}</div>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-slate-200 text-xl leading-none">×</button>
+        </div>
+        <div className="p-4 overflow-auto flex-1 space-y-3">
+          {locked && (
+            <div className="p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
+              🔒 Provider config is locked. Unlock from the LLM or Security tab to save changes here.
+            </div>
+          )}
+          {schema.length === 0 && (
+            <div className="text-sm text-gray-500 italic">
+              No editable fields registered for this provider. Add a schema in PROVIDER_FIELD_SCHEMAS.
+            </div>
+          )}
+          {schema.map(f => {
+            const isSecret = f.type === 'password';
+            const showVal = !isSecret || reveal[f.field];
+            return (
+              <div key={f.field}>
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-200 mb-1">
+                  {f.label}{f.required && <span className="text-red-600 ml-0.5">*</span>}
+                </label>
+                <div className="relative">
+                  <input
+                    type={showVal ? 'text' : 'password'}
+                    value={values[f.field] || ''}
+                    placeholder={f.placeholder}
+                    disabled={locked || saving}
+                    onChange={e => setValues({ ...values, [f.field]: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 dark:text-slate-100 font-mono text-sm pr-9 disabled:opacity-60"
+                  />
+                  {isSecret && (
+                    <button
+                      type="button"
+                      onClick={() => setReveal({ ...reveal, [f.field]: !reveal[f.field] })}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                      title={reveal[f.field] ? 'Hide' : 'Reveal'}
+                    >
+                      {reveal[f.field] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
+                  )}
+                </div>
+                {f.help && <div className="text-xs text-gray-500 dark:text-slate-400 mt-1">{f.help}</div>}
+              </div>
+            );
+          })}
+          {err && <div className="text-sm text-red-600 dark:text-red-400">⚠ {err}</div>}
+        </div>
+        <div className="px-4 py-3 border-t border-gray-200 dark:border-slate-700 flex justify-end gap-2">
+          <button onClick={onClose} disabled={saving}
+            className="px-3 py-1.5 rounded text-sm bg-gray-100 dark:bg-slate-700 dark:text-slate-100 disabled:opacity-50">
+            Cancel
+          </button>
+          <button onClick={save} disabled={locked || saving || !dirty}
+            className="px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
+            {saving ? 'Saving…' : (dirty ? 'Save changes' : 'No changes')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ProvidersTab: React.FC<ProvidersTabProps> = ({
   providers, guardrailProviders, config, onConfigUpdate, onActivate,
 }) => {
   const locked = !!config.provider_config_locked;
   const disabledList: string[] = (config as any).disabled_providers || [];
+  const [editing, setEditing] = React.useState<{ id: string; display_name: string } | null>(null);
 
   const toggleEnabled = async (id: string, currentEnabled: boolean) => {
     const next = currentEnabled
@@ -1651,6 +1833,7 @@ const ProvidersTab: React.FC<ProvidersTabProps> = ({
       : !enabled
       ? <span className="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">disabled</span>
       : <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">configured</span>;
+    const hasSchema = PROVIDER_FIELD_SCHEMAS[p.id]?.length > 0;
     return (
       <tr key={p.id} className="border-b border-gray-100 dark:border-slate-800">
         <td className="py-2 px-3">
@@ -1681,6 +1864,17 @@ const ProvidersTab: React.FC<ProvidersTabProps> = ({
             <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
           </button>
         </td>
+        <td className="py-2 px-3 text-center">
+          <button
+            type="button"
+            disabled={!hasSchema}
+            onClick={() => setEditing({ id: p.id, display_name: p.display_name })}
+            className="px-2 py-1 text-xs rounded bg-gray-100 dark:bg-slate-700 dark:text-slate-100 hover:bg-gray-200 dark:hover:bg-slate-600 disabled:opacity-40"
+            title={hasSchema ? 'Edit provider keys' : 'No schema registered for this provider yet'}
+          >
+            {configured ? 'Edit' : 'Configure'}
+          </button>
+        </td>
       </tr>
     );
   };
@@ -1692,7 +1886,7 @@ const ProvidersTab: React.FC<ProvidersTabProps> = ({
         <p className="text-sm text-gray-600 dark:text-slate-400 mt-1">
           One place to manage LLM and Guardrail providers. Toggle <strong>Enabled</strong> to include/exclude
           from runtime fan-out (compare, matrix, health). Use the <strong>Active</strong> radio to pick which
-          one handles the live chat flow. Configure keys in the <a href="#" onClick={(e) => { e.preventDefault(); const _evt = new CustomEvent('admin-go-tab', { detail: 'llm' }); window.dispatchEvent(_evt); }} className="underline">LLM</a> and <a href="#" onClick={(e) => { e.preventDefault(); const _evt = new CustomEvent('admin-go-tab', { detail: 'security' }); window.dispatchEvent(_evt); }} className="underline">Security</a> tabs.
+          one handles the live chat flow. Click <strong>Edit</strong> to update API keys for each provider.
         </p>
         {locked && (
           <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
@@ -1710,6 +1904,7 @@ const ProvidersTab: React.FC<ProvidersTabProps> = ({
               <th className="py-2 px-3 text-left w-32">Status</th>
               <th className="py-2 px-3 text-center w-24">Active</th>
               <th className="py-2 px-3 text-center w-24">Enabled</th>
+              <th className="py-2 px-3 text-center w-24">Actions</th>
             </tr>
           </thead>
           <tbody>{providers.map(p => renderRow(p, 'llm', isConfiguredLLM(p)))}</tbody>
@@ -1725,11 +1920,22 @@ const ProvidersTab: React.FC<ProvidersTabProps> = ({
               <th className="py-2 px-3 text-left w-32">Status</th>
               <th className="py-2 px-3 text-center w-24">Active</th>
               <th className="py-2 px-3 text-center w-24">Enabled</th>
+              <th className="py-2 px-3 text-center w-24">Actions</th>
             </tr>
           </thead>
           <tbody>{guardrailProviders.map(p => renderRow(p, 'guardrail', isConfiguredGuard(p)))}</tbody>
         </table>
       </div>
+
+      {editing && (
+        <EditProviderModal
+          provider={editing}
+          config={config}
+          locked={locked}
+          onSave={onConfigUpdate}
+          onClose={() => setEditing(null)}
+        />
+      )}
     </div>
   );
 };
