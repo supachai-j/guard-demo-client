@@ -47,6 +47,9 @@ export interface AppConfig {
   portkey_api_key?: string;
   portkey_virtual_key?: string;
   portkey_base_url?: string;
+  // ThaiLLM (national Thai LLM gateway — OpenAI-compatible)
+  thaillm_api_key?: string;
+  thaillm_base_url?: string;
   // Cloudflare Firewall for AI
   cloudflare_account_id?: string;
   cloudflare_api_token?: string;
@@ -106,6 +109,9 @@ export interface AppConfigUpdate {
   portkey_api_key?: string;
   portkey_virtual_key?: string;
   portkey_base_url?: string;
+  // ThaiLLM (national Thai LLM gateway — OpenAI-compatible)
+  thaillm_api_key?: string;
+  thaillm_base_url?: string;
   // Cloudflare Firewall for AI
   cloudflare_account_id?: string;
   cloudflare_api_token?: string;

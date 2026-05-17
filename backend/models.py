@@ -64,6 +64,10 @@ class AppConfig(Base):
     portkey_api_key = Column(String, nullable=True)
     portkey_virtual_key = Column(String, nullable=True)
     portkey_base_url = Column(String, nullable=True)
+    # ThaiLLM (national Thai LLM gateway — OpenAI-compatible custom endpoint,
+    # used when llm_provider="thaillm"). Default base URL applied in providers.py.
+    thaillm_api_key = Column(String, nullable=True)
+    thaillm_base_url = Column(String, nullable=True)
     # Cloudflare Firewall for AI
     cloudflare_account_id = Column(String, nullable=True)
     cloudflare_api_token = Column(String, nullable=True)

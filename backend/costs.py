@@ -62,6 +62,7 @@ PRICING: Dict[str, Dict[str, Tuple[float, float]]] = {
     "litellm_proxy": {},   # depends on what the proxy routes to; left to the proxy to report
     "portkey": {},         # depends on virtual key routing
     "openrouter": {},      # depends on routed upstream model — OpenRouter bills per-token at its own table
+    "thaillm": {},         # custom OpenAI-compatible endpoint; pricing depends on operator/model
 }
 
 
@@ -85,7 +86,7 @@ def estimate_cost_usd(
     0.0 so the UI can show "$0.00" instead of "unknown"."""
     if provider in {"ollama"}:
         return 0.0
-    if provider in {"litellm_proxy", "portkey", "openrouter"} and model not in (PRICING.get(provider) or {}):
+    if provider in {"litellm_proxy", "portkey", "openrouter", "thaillm"} and model not in (PRICING.get(provider) or {}):
         # We don't know what the gateway routes to; mark as unknown.
         return None
     price = get_price(provider or "", model or "")

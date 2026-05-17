@@ -1412,6 +1412,10 @@ const PROVIDER_FIELD_SCHEMAS: Record<string, ProviderFieldDef[]> = {
     { field: 'portkey_virtual_key', label: 'Portkey Virtual Key', type: 'password' },
     { field: 'portkey_base_url', label: 'Portkey Base URL', type: 'text', placeholder: 'https://api.portkey.ai/v1' },
   ],
+  thaillm: [
+    { field: 'thaillm_api_key', label: 'ThaiLLM API Key', type: 'password', help: 'Optional — leave blank if the endpoint is open' },
+    { field: 'thaillm_base_url', label: 'ThaiLLM Base URL', type: 'text', placeholder: 'http://thaillm.or.th/api', help: 'OpenAI-compatible endpoint. /v1 is auto-appended at call time if missing.' },
+  ],
   // Guardrail providers
   lakera: [
     { field: 'lakera_api_key', label: 'Lakera API Key', type: 'password', required: true },

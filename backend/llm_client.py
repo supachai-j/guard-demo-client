@@ -173,6 +173,13 @@ def _build_litellm_kwargs(
             kwargs["extra_body"] = extra_body
         # Force OpenAI-compatible custom provider so LiteLLM proxies through correctly.
         kwargs["custom_llm_provider"] = "openai"
+    elif pid == "thaillm":
+        # ThaiLLM is an OpenAI-compatible custom endpoint. LiteLLM's openai
+        # provider can hit any base URL — auto-append /v1 if the operator
+        # entered the bare host URL (same convenience as litellm_proxy).
+        if base_url and not base_url.rstrip("/").endswith("/v1"):
+            kwargs["api_base"] = f"{base_url.rstrip('/')}/v1"
+        kwargs["custom_llm_provider"] = "openai"
     elif pid == "portkey":
         # Portkey is OpenAI-compatible; auth via x-portkey-api-key + optional virtual key.
         # Self-managed deployments can override the gateway URL via portkey_base_url.
@@ -428,6 +435,16 @@ def get_models(config: Optional[AppConfig] = None) -> List[str]:
     if pid == "ollama":
         base = provider_base_url(cfg) or "http://localhost:11434"
         dyn = _get_models_ollama(base)
+        if dyn:
+            return dyn
+    if pid == "thaillm":
+        # OpenAI-compatible /v1/models — reuse the litellm_proxy helper since
+        # it speaks the same {data: [{id: ...}, ...]} schema. Helper appends
+        # /v1 itself, so strip a trailing /v1 first to avoid /v1/v1/models.
+        base = (provider_base_url(cfg) or "http://thaillm.or.th/api").rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        dyn = _get_models_litellm_proxy(provider_api_key(cfg), base)
         if dyn:
             return dyn
     return provider_static_models(pid) or STATIC_MODELS

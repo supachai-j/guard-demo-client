@@ -108,6 +108,9 @@ _MIGRATIONS = [
         "app_config", "disabled_providers", "TEXT",
         backfill="UPDATE app_config SET disabled_providers = '[]' WHERE disabled_providers IS NULL",
     ),
+    # ThaiLLM gateway — OpenAI-compatible custom endpoint at thaillm.or.th/api.
+    Migration("app_config", "thaillm_api_key", "VARCHAR"),
+    Migration("app_config", "thaillm_base_url", "VARCHAR"),
 ]
 
 

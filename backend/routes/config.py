@@ -46,6 +46,8 @@ PROVIDER_CONFIG_FIELDS = frozenset([
     "litellm_guardrail_name", "litellm_guardrail_monitor_name",
     # Portkey
     "portkey_api_key", "portkey_virtual_key", "portkey_base_url",
+    # ThaiLLM
+    "thaillm_api_key", "thaillm_base_url",
     # Guardrail provider selection + per-provider config
     "guardrail_provider",
     "lakera_api_key", "lakera_project_id", "lakera_enabled", "lakera_blocking_mode",
