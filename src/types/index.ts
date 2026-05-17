@@ -53,6 +53,8 @@ export interface AppConfig {
   cloudflare_gateway_id?: string;
   // Webhook
   webhook_url?: string;
+  // Demo-safe lock — when true, provider config fields are read-only
+  provider_config_locked?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -110,6 +112,8 @@ export interface AppConfigUpdate {
   cloudflare_gateway_id?: string;
   // Webhook
   webhook_url?: string;
+  // Demo-safe lock — toggle whether provider config CRUD is allowed
+  provider_config_locked?: boolean;
 }
 
 // Guardrail provider catalog (GET /api/guardrail-providers)

@@ -98,6 +98,9 @@ _MIGRATIONS = [
     Migration("audit_log", "input_tokens", "INTEGER"),
     Migration("audit_log", "output_tokens", "INTEGER"),
     Migration("audit_log", "cost_usd", "VARCHAR"),
+    # Demo-safe lock: when ON, provider config CRUD is read-only via the API.
+    # Default 0 so existing installs keep working unchanged.
+    Migration("app_config", "provider_config_locked", "BOOLEAN DEFAULT 0"),
 ]
 
 

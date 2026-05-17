@@ -61,6 +61,7 @@ class AppConfigResponse(AppConfigBase):
     cloudflare_api_token: Optional[str] = None
     cloudflare_gateway_id: Optional[str] = None
     webhook_url: Optional[str] = None
+    provider_config_locked: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -101,6 +102,9 @@ class AppConfigUpdate(AppConfigBase):
     cloudflare_api_token: Optional[str] = None
     cloudflare_gateway_id: Optional[str] = None
     webhook_url: Optional[str] = None
+    # Demo-safe lock: when True, provider-related fields are read-only via PUT
+    # /api/config and POST /api/config/import. Toggle itself always changeable.
+    provider_config_locked: Optional[bool] = None
 
 
 # Chat schemas

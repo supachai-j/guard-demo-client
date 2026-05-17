@@ -526,6 +526,39 @@ const AdminConsole: React.FC = () => {
 
         {/* Tab Content */}
         <div className="mt-8">
+          {/* Provider Config Lock — visible across all tabs; toggle always
+              available so the operator can lock before customer demo and
+              unlock when the demo ends. */}
+          {(activeTab === 'llm' || activeTab === 'security') && config && (
+            config.provider_config_locked ? (
+              <div className="mb-4 bg-amber-50 border border-amber-300 rounded-lg p-3 flex items-center justify-between">
+                <div>
+                  <strong className="text-amber-900">🔒 Provider config locked</strong>
+                  <p className="text-xs text-amber-800 mt-0.5">Read-only mode active. Provider keys, model, and active provider selection cannot be changed. Click Unlock to enable edits.</p>
+                </div>
+                <button
+                  onClick={() => handleConfigUpdate({ provider_config_locked: false })}
+                  className="ml-4 px-3 py-1.5 rounded text-sm bg-amber-600 text-white hover:bg-amber-700 whitespace-nowrap"
+                >
+                  🔓 Unlock
+                </button>
+              </div>
+            ) : (
+              <div className="mb-4 bg-gray-50 border border-gray-200 rounded p-2 flex items-center justify-between text-xs">
+                <span className="text-gray-600">🔓 Provider config editable</span>
+                <button
+                  onClick={() => {
+                    if (window.confirm('Lock provider config to read-only?\n\nUseful before a customer demo to prevent accidental key/provider changes during the session.\n\nYou can unlock at any time via this same banner.')) {
+                      handleConfigUpdate({ provider_config_locked: true });
+                    }
+                  }}
+                  className="px-2 py-1 rounded bg-gray-200 hover:bg-gray-300 text-gray-700"
+                >
+                  🔒 Lock for demo
+                </button>
+              </div>
+            )
+          )}
           {activeTab === 'setup' && (
             <div className="space-y-6">
               <h2 className="text-lg font-semibold text-gray-900">Setup Instructions</h2>
@@ -752,7 +785,7 @@ const AdminConsole: React.FC = () => {
           )}
 
           {activeTab === 'llm' && (
-            <div className="space-y-6">
+            <fieldset disabled={!!config?.provider_config_locked} className={`space-y-6 border-0 p-0 m-0 min-w-0 ${config?.provider_config_locked ? 'opacity-70' : ''}`}>
               <h2 className="text-lg font-semibold text-gray-900">LLM Configuration</h2>
 
               {/* Provider + key + (optional) base URL — moved here from Security so
@@ -917,7 +950,7 @@ const AdminConsole: React.FC = () => {
                   />
                 </div>
               </div>
-            </div>
+            </fieldset>
           )}
 
           {activeTab === 'rag' && (
@@ -1174,7 +1207,7 @@ const AdminConsole: React.FC = () => {
           )}
 
           {activeTab === 'security' && (
-            <div className="space-y-6">
+            <fieldset disabled={!!config?.provider_config_locked} className={`space-y-6 border-0 p-0 m-0 min-w-0 ${config?.provider_config_locked ? 'opacity-70' : ''}`}>
               <h2 className="text-lg font-semibold text-gray-900">Security Configuration</h2>
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -1404,7 +1437,7 @@ const AdminConsole: React.FC = () => {
                   );
                 })()}
               </div>
-            </div>
+            </fieldset>
           )}
 
           {activeTab === 'prompts' && (

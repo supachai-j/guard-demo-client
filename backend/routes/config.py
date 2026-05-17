@@ -30,6 +30,33 @@ router = APIRouter(tags=["config"])
 
 
 # Export sections: which config fields belong to which section (for selective export/import)
+# Fields locked when AppConfig.provider_config_locked = True. Edits to any
+# of these via PUT /api/config or POST /api/config/import return 403; the
+# lock toggle itself is intentionally excluded so the operator can still
+# unlock. Keep this list in sync with the AppConfig model — new provider
+# fields must be added here or the lock silently lets them through.
+PROVIDER_CONFIG_FIELDS = frozenset([
+    # LLM provider selection + model + per-provider keys
+    "llm_provider", "openai_model", "use_litellm",
+    "openai_api_key", "anthropic_api_key", "google_api_key",
+    "mistral_api_key", "groq_api_key", "together_api_key",
+    "openrouter_api_key", "ollama_base_url",
+    # LiteLLM proxy
+    "litellm_base_url", "litellm_virtual_key",
+    "litellm_guardrail_name", "litellm_guardrail_monitor_name",
+    # Portkey
+    "portkey_api_key", "portkey_virtual_key", "portkey_base_url",
+    # Guardrail provider selection + per-provider config
+    "guardrail_provider",
+    "lakera_api_key", "lakera_project_id", "lakera_enabled", "lakera_blocking_mode",
+    "rag_lakera_project_id",
+    "bedrock_guardrail_id", "bedrock_guardrail_version", "bedrock_region",
+    "bedrock_access_key_id", "bedrock_secret_access_key",
+    "azure_content_safety_endpoint", "azure_content_safety_key",
+    "palo_alto_api_key", "palo_alto_profile_name", "palo_alto_host",
+    "cloudflare_account_id", "cloudflare_api_token", "cloudflare_gateway_id",
+])
+
 EXPORT_SECTIONS = {
     "appearance": ["business_name", "tagline", "hero_text", "hero_image_url", "logo_url", "theme"],
     "llm": [
@@ -71,8 +98,29 @@ async def update_config(config_update: AppConfigUpdate, db: Session = Depends(ge
         config = AppConfig()
         db.add(config)
 
+    payload = config_update.dict(exclude_unset=True)
+
+    # Demo-safe lock — when the stored row says provider_config_locked=True,
+    # reject any attempt to CHANGE a provider-related field. We compare value
+    # (not just key presence) so the existing frontend pattern of "send all
+    # fields every save" still works for non-provider edits (theme, prompt,
+    # webhook) and for the unlock toggle itself.
+    if config.provider_config_locked:
+        actual_changes = {
+            k for k in (PROVIDER_CONFIG_FIELDS & set(payload.keys()))
+            if payload[k] != getattr(config, k, None)
+        }
+        if actual_changes:
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    f"Provider config is locked. Unlock first to change: "
+                    f"{sorted(actual_changes)}"
+                ),
+            )
+
     # Update fields
-    for field, value in config_update.dict(exclude_unset=True).items():
+    for field, value in payload.items():
         setattr(config, field, value)
 
     # Keep legacy use_litellm flag in sync with the new provider selector.
@@ -427,6 +475,25 @@ async def import_config(file: UploadFile = File(...), db: Session = Depends(get_
                     config_row = AppConfig()
                     db.add(config_row)
                     db.flush()
+                # Respect demo-safe lock — import that would touch any provider
+                # field is rejected wholesale (no partial import) so the
+                # operator sees a clean 403 instead of silent partial state.
+                if config_row.provider_config_locked:
+                    blocked_fields: set = set()
+                    for section, fields in EXPORT_SECTIONS.items():
+                        if section not in includes:
+                            continue
+                        for field in fields:
+                            if field in config_data and field in PROVIDER_CONFIG_FIELDS:
+                                blocked_fields.add(field)
+                    if blocked_fields:
+                        raise HTTPException(
+                            status_code=403,
+                            detail=(
+                                f"Provider config is locked. Unlock first to import: "
+                                f"{sorted(blocked_fields)}"
+                            ),
+                        )
                 for section, fields in EXPORT_SECTIONS.items():
                     if section not in includes:
                         continue

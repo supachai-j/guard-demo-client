@@ -70,6 +70,10 @@ class AppConfig(Base):
     cloudflare_gateway_id = Column(String, nullable=True)
     # Webhook (POSTed when a guardrail flags content)
     webhook_url = Column(String, nullable=True)
+    # Demo-safe lock: when True, provider config fields (api keys, endpoints,
+    # provider selection) are read-only via the API. Toggle itself is always
+    # changeable so the operator can unlock when the demo ends.
+    provider_config_locked = Column(Boolean, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
