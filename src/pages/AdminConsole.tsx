@@ -29,7 +29,6 @@ const AdminConsole: React.FC = () => {
   const [isImporting, setIsImporting] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [guardrailProviders, setGuardrailProviders] = useState<GuardrailProviderInfo[]>([]);
-  const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
   const [showMCPInstructions, setShowMCPInstructions] = useState(false);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const [ragScanningNotificationCount, setRagScanningNotificationCount] = useState<number>(0);
@@ -1092,234 +1091,123 @@ const AdminConsole: React.FC = () => {
           {activeTab === 'security' && (
             <fieldset disabled={!!config?.provider_config_locked} className={`space-y-6 border-0 p-0 m-0 min-w-0 ${config?.provider_config_locked ? 'opacity-70' : ''}`}>
               <h2 className="text-lg font-semibold text-gray-900">Security Configuration</h2>
-              <div className="space-y-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-4">
-                    <div className="space-y-4">
-                      <div className="flex items-center space-x-3">
-                        <button
-                          type="button"
-                          onClick={() => handleConfigUpdate({ lakera_enabled: !config.lakera_enabled })}
-                          className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                            config.lakera_enabled ? 'bg-primary-600' : 'bg-gray-200'
-                          }`}
-                        >
-                          <span
-                            className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                              config.lakera_enabled ? 'translate-x-6' : 'translate-x-1'
-                            }`}
-                          />
-                        </button>
-                        <label className="text-sm font-medium text-gray-700">
-                          Enable Lakera Guard
-                        </label>
+
+              {/* Active guardrail summary — selection + keys + per-vendor
+                  config all live in the Providers tab. This tab keeps only
+                  guardrail BEHAVIOUR settings (master enable, blocking vs
+                  logging mode, RAG scanning). */}
+              {(() => {
+                const activeGuardrailId = config.guardrail_provider || 'lakera';
+                const activeProvider = guardrailProviders.find((p) => p.id === activeGuardrailId);
+                return (
+                  <div className="p-4 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-slate-700 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">Active Guardrail Provider</div>
+                      <div className="font-medium text-gray-900 dark:text-slate-100 mt-0.5">
+                        {activeProvider?.display_name || activeGuardrailId}
                       </div>
-                      
-                      {config.lakera_enabled && (
-                        <div className="ml-8 p-4 bg-gray-50 rounded-lg border">
-                          <h4 className="text-sm font-medium text-gray-700 mb-3">Security Options</h4>
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Blocking Mode Toggle */}
-                            <div className="flex items-center space-x-3">
-                              <button
-                                type="button"
-                                onClick={() => handleConfigUpdate({ lakera_blocking_mode: !config.lakera_blocking_mode })}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                                  config.lakera_blocking_mode ? 'bg-red-600' : 'bg-gray-200'
-                                }`}
-                              >
-                                <span
-                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                    config.lakera_blocking_mode ? 'translate-x-6' : 'translate-x-1'
-                                  }`}
-                                />
-                              </button>
-                              <div>
-                                <label className="text-sm font-medium text-gray-700">
-                                  Blocking Mode
-                                </label>
-                                <p className="text-xs text-gray-500">
-                                  Block flagged content instead of just logging
-                                </p>
-                              </div>
-                            </div>
-                            
-                            {/* RAG Content Scanning Toggle */}
-                            <div className="flex items-center space-x-3">
-                              <button
-                                type="button"
-                                onClick={() => handleConfigUpdate({ rag_content_scanning: !config.rag_content_scanning })}
-                                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
-                                  config.rag_content_scanning ? 'bg-primary-600' : 'bg-gray-200'
-                                }`}
-                              >
-                                <span
-                                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                    config.rag_content_scanning ? 'translate-x-6' : 'translate-x-1'
-                                  }`}
-                                />
-                              </button>
-                              <div>
-                                <label className="text-sm font-medium text-gray-700">
-                                  RAG Content Scanning
-                                </label>
-                                <p className="text-xs text-gray-500">
-                                  Scan document chunks during ingestion
-                                </p>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                      
-                      {config.rag_content_scanning && (
-                        <div className="space-y-2">
-                          <label className="block text-sm font-medium text-gray-700">
-                            RAG Scanning Project ID
-                          </label>
-                          <input
-                            type="text"
-                            value={config.rag_lakera_project_id || ''}
-                            onChange={(e) => handleConfigUpdate({ rag_lakera_project_id: e.target.value })}
-                            placeholder="project-8541012967"
-                            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                          <p className="text-xs text-gray-500">
-                            Separate project ID for RAG content scanning to keep it isolated from chat interface scanning.
-                          </p>
-                        </div>
-                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('providers')}
+                      className="px-3 py-1.5 text-sm rounded bg-gray-100 dark:bg-slate-700 dark:text-slate-100 hover:bg-gray-200 dark:hover:bg-slate-600"
+                    >
+                      Manage in Providers tab →
+                    </button>
+                  </div>
+                );
+              })()}
+
+              {/* Master guardrail enable — legacy name (lakera_enabled) but
+                  actually controls ALL guardrails via the active provider.
+                  When off, agent.py bypasses every guardrail check. */}
+              <div className="flex items-center space-x-3">
+                <button
+                  type="button"
+                  onClick={() => handleConfigUpdate({ lakera_enabled: !config.lakera_enabled })}
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                    config.lakera_enabled ? 'bg-primary-600' : 'bg-gray-200'
+                  }`}
+                >
+                  <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    config.lakera_enabled ? 'translate-x-6' : 'translate-x-1'
+                  }`} />
+                </button>
+                <div>
+                  <label className="text-sm font-medium text-gray-700">
+                    Enable Guardrails (master switch)
+                  </label>
+                  <p className="text-xs text-gray-500">
+                    Master toggle — when off, agent skips every guardrail check regardless of active provider.
+                  </p>
+                </div>
+              </div>
+
+              {config.lakera_enabled && (
+                <div className="ml-8 p-4 bg-gray-50 rounded-lg border space-y-4">
+                  <h4 className="text-sm font-medium text-gray-700">Guardrail Behaviour</h4>
+
+                  {/* Blocking vs Logging */}
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => handleConfigUpdate({ lakera_blocking_mode: !config.lakera_blocking_mode })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                        config.lakera_blocking_mode ? 'bg-red-600' : 'bg-gray-200'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config.lakera_blocking_mode ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">Blocking Mode</label>
+                      <p className="text-xs text-gray-500">
+                        {config.lakera_blocking_mode
+                          ? '🚫 Block flagged content (block + log)'
+                          : '📝 Logging only — flagged content passes through with audit entry'}
+                      </p>
                     </div>
                   </div>
-                  
-                  {config.lakera_enabled && (
-                    <div className="text-xs text-gray-500 max-w-xs">
-                      {config.lakera_blocking_mode 
-                        ? "🚫 Blocking mode enabled - flagged content will be blocked" 
-                        : "📝 Logging mode - flagged content will be logged but allowed"}
+
+                  {/* RAG content scanning */}
+                  <div className="flex items-center space-x-3">
+                    <button
+                      type="button"
+                      onClick={() => handleConfigUpdate({ rag_content_scanning: !config.rag_content_scanning })}
+                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 ${
+                        config.rag_content_scanning ? 'bg-primary-600' : 'bg-gray-200'
+                      }`}
+                    >
+                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                        config.rag_content_scanning ? 'translate-x-6' : 'translate-x-1'
+                      }`} />
+                    </button>
+                    <div>
+                      <label className="text-sm font-medium text-gray-700">RAG Content Scanning</label>
+                      <p className="text-xs text-gray-500">Scan document chunks during ingestion (Lakera)</p>
+                    </div>
+                  </div>
+
+                  {config.rag_content_scanning && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-2">
+                        RAG Scanning Project ID (Lakera-specific)
+                      </label>
+                      <input
+                        type="text"
+                        value={config.rag_lakera_project_id || ''}
+                        onChange={(e) => handleConfigUpdate({ rag_lakera_project_id: e.target.value })}
+                        placeholder="project-8541012967"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        Separate Lakera project for RAG scanning — keeps it isolated from chat-interface scanning.
+                      </p>
                     </div>
                   )}
                 </div>
-                
-                <p className="text-xs text-gray-500 italic">
-                  LLM provider, API key, and base URL moved to the <strong>LLM</strong> tab so they sit next to the model picker. This tab now covers guardrails and webhooks only.
-                </p>
-                {config.llm_provider === 'litellm_proxy' && config.lakera_enabled && (
-                  <div className="space-y-3">
-                    <p className="text-xs text-gray-600">
-                      In LiteLLM mode, the app selects a guardrail name based on Lakera blocking mode.
-                      These names should match entries in <code className="text-xs bg-gray-100 px-1 rounded">litellm/config.yaml</code>.
-                    </p>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        LiteLLM guardrail name (blocking)
-                      </label>
-                      <input
-                        type="text"
-                        value={config.litellm_guardrail_name ?? ''}
-                        onChange={(e) => handleConfigUpdate({ litellm_guardrail_name: e.target.value })}
-                        placeholder="lakera-guard-block"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        LiteLLM guardrail name (monitor)
-                      </label>
-                      <input
-                        type="text"
-                        value={config.litellm_guardrail_monitor_name ?? ''}
-                        onChange={(e) =>
-                          handleConfigUpdate({ litellm_guardrail_monitor_name: e.target.value })
-                        }
-                        placeholder="lakera-guard-monitor"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      />
-                    </div>
-                  </div>
-                )}
-                {/* Guardrail provider selector + per-provider config */}
-                {(() => {
-                  const activeGuardrailId = config.guardrail_provider || 'lakera';
-                  const activeProvider = guardrailProviders.find((p) => p.id === activeGuardrailId);
-                  return (
-                    <div className="space-y-4 pt-4 border-t border-gray-200">
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Guardrail provider
-                        </label>
-                        <select
-                          value={activeGuardrailId}
-                          onChange={(e) => handleConfigUpdate({ guardrail_provider: e.target.value })}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        >
-                          {guardrailProviders.length === 0 ? (
-                            <option value={activeGuardrailId}>{activeGuardrailId}</option>
-                          ) : (
-                            guardrailProviders.map((p) => (
-                              <option key={p.id} value={p.id}>{p.display_name}</option>
-                            ))
-                          )}
-                        </select>
-                        {activeProvider?.summary && (
-                          <p className="text-xs text-gray-500 mt-1">
-                            {activeProvider.summary}
-                            {activeProvider.docs_url && (
-                              <>
-                                {' · '}
-                                <a href={activeProvider.docs_url} target="_blank" rel="noopener noreferrer" className="text-primary-600 hover:underline">
-                                  docs ↗
-                                </a>
-                              </>
-                            )}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Per-provider fields driven by /api/guardrail-providers catalog */}
-                      {activeProvider?.fields.map((field) => {
-                        const key = field.name as keyof AppConfig;
-                        const value = (config[key] as string | undefined) || '';
-                        const isSecret = field.type === 'password';
-                        const revealed = revealedSecrets[field.name] ?? false;
-                        return (
-                          <div key={field.name}>
-                            <label className="block text-sm font-medium text-gray-700 mb-2">
-                              {field.label}
-                            </label>
-                            <div className="relative">
-                              <input
-                                type={isSecret && !revealed ? 'password' : 'text'}
-                                value={value}
-                                onChange={(e) => handleConfigUpdate({ [field.name]: e.target.value } as any)}
-                                placeholder={field.placeholder || ''}
-                                className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                              />
-                              {isSecret && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setRevealedSecrets((prev) => ({ ...prev, [field.name]: !prev[field.name] }))
-                                  }
-                                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                                >
-                                  {revealed ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-
-                      {activeProvider && activeProvider.fields.length === 0 && (
-                        <p className="text-xs text-gray-500 italic">
-                          This provider reuses credentials configured above (no extra fields needed).
-                        </p>
-                      )}
-                    </div>
-                  );
-                })()}
-              </div>
+              )}
             </fieldset>
           )}
 
