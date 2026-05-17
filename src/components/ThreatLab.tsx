@@ -51,7 +51,7 @@ type Recording = {
   created_at: string;
 };
 
-type Tab = 'audit' | 'cost' | 'compare' | 'compare-llms' | 'playbook' | 'batch' | 'health' | 'recordings' | 'webhook';
+type Tab = 'audit' | 'cost' | 'compare' | 'compare-llms' | 'playbook' | 'history' | 'batch' | 'health' | 'recordings' | 'webhook';
 
 const ThreatLab: React.FC = () => {
   const [tab, setTab] = useState<Tab>('audit');
@@ -64,6 +64,7 @@ const ThreatLab: React.FC = () => {
         <TabBtn current={tab} id="compare" onClick={setTab}>Guardrail compare</TabBtn>
         <TabBtn current={tab} id="compare-llms" onClick={setTab}>Compare LLMs</TabBtn>
         <TabBtn current={tab} id="playbook" onClick={setTab}>Playbooks</TabBtn>
+        <TabBtn current={tab} id="history" onClick={setTab}>Run History</TabBtn>
         <TabBtn current={tab} id="batch" onClick={setTab}>Batch eval</TabBtn>
         <TabBtn current={tab} id="health" onClick={setTab}>Health</TabBtn>
         <TabBtn current={tab} id="recordings" onClick={setTab}>Recordings</TabBtn>
@@ -74,6 +75,7 @@ const ThreatLab: React.FC = () => {
       {tab === 'compare' && <ComparePanel />}
       {tab === 'compare-llms' && <CompareLlmsPanel />}
       {tab === 'playbook' && <PlaybookPanel />}
+      {tab === 'history' && <HistoryPanel />}
       {tab === 'batch' && <BatchPanel />}
       {tab === 'health' && <HealthPanel />}
       {tab === 'recordings' && <RecordingsPanel />}
@@ -842,6 +844,279 @@ const WebhookPanel: React.FC = () => {
           {result.body && <pre className="text-xs mt-1 whitespace-pre-wrap">{result.body}</pre>}
         </div>
       )}
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Run History panel — persisted playbook runs + side-by-side compare.
+// ─────────────────────────────────────────────────────────────────
+
+type RunSummary = {
+  id: number;
+  playbook_slug: string;
+  playbook_name: string;
+  guardrail_provider: string;
+  guardrail_display_name?: string;
+  llm_provider?: string;
+  total: number;
+  detected: number;
+  detection_rate: number;
+  pass_rate: number;
+  notes?: string | null;
+  created_at: string;
+};
+
+const HistoryPanel: React.FC = () => {
+  const [runs, setRuns] = useState<RunSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [filterPlaybook, setFilterPlaybook] = useState<string>('');
+  const [filterProvider, setFilterProvider] = useState<string>('');
+  const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [compareData, setCompareData] = useState<any | null>(null);
+  const [detailData, setDetailData] = useState<any | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const filters: any = {};
+      if (filterPlaybook) filters.playbook_slug = filterPlaybook;
+      if (filterProvider) filters.guardrail_provider = filterProvider;
+      const data = await apiService.listPlaybookRuns(filters);
+      setRuns(data.runs || []);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => { load(); }, [filterPlaybook, filterProvider]); // eslint-disable-line
+
+  const toggle = (id: number) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const doCompare = async () => {
+    if (selected.size < 2 || selected.size > 5) return;
+    try {
+      const data = await apiService.comparePlaybookRuns(Array.from(selected));
+      setCompareData(data);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  };
+
+  const doDelete = async (id: number) => {
+    if (!confirm(`Delete run #${id}? This cannot be undone.`)) return;
+    try {
+      await apiService.deletePlaybookRun(id);
+      setSelected(prev => { const n = new Set(prev); n.delete(id); return n; });
+      load();
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  };
+
+  const doViewDetail = async (id: number) => {
+    try {
+      const data = await apiService.getPlaybookRun(id);
+      setDetailData(data);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    }
+  };
+
+  // Build filter dropdown options from loaded runs
+  const playbookOptions = Array.from(new Set(runs.map(r => r.playbook_slug)));
+  const providerOptions = Array.from(new Set(runs.map(r => r.guardrail_provider)));
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-white dark:bg-slate-800 rounded border border-gray-200 dark:border-slate-700 p-4">
+        <div className="flex flex-wrap gap-3 items-center mb-3">
+          <select value={filterPlaybook} onChange={e => setFilterPlaybook(e.target.value)}
+            className="px-2 py-1 border rounded text-sm dark:bg-slate-900 dark:border-slate-600 dark:text-slate-100">
+            <option value="">All playbooks</option>
+            {playbookOptions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={filterProvider} onChange={e => setFilterProvider(e.target.value)}
+            className="px-2 py-1 border rounded text-sm dark:bg-slate-900 dark:border-slate-600 dark:text-slate-100">
+            <option value="">All providers</option>
+            {providerOptions.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <button onClick={load} disabled={loading}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-gray-100 dark:bg-slate-700 dark:text-slate-100 disabled:opacity-50">
+            <RefreshCw className="w-3.5 h-3.5" /> {loading ? 'Loading…' : 'Refresh'}
+          </button>
+          <button onClick={doCompare} disabled={selected.size < 2 || selected.size > 5}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
+            Compare ({selected.size})
+          </button>
+          <span className="text-xs text-gray-500 dark:text-slate-400">Select 2–5 runs to compare</span>
+        </div>
+        {error && <div className="text-sm text-red-600 dark:text-red-400 mb-2">⚠ {error}</div>}
+        {runs.length === 0 && !loading && (
+          <div className="text-sm text-gray-500 dark:text-slate-400 py-6 text-center">
+            No runs yet. Go to Playbooks tab → run any playbook to save history here.
+          </div>
+        )}
+        {runs.length > 0 && (
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="text-left border-b border-gray-200 dark:border-slate-700 text-gray-600 dark:text-slate-300">
+                <th className="py-2 pr-2 w-8"></th>
+                <th className="py-2 pr-2">Run</th>
+                <th className="py-2 pr-2">Playbook</th>
+                <th className="py-2 pr-2">Provider</th>
+                <th className="py-2 pr-2 text-right">Detection</th>
+                <th className="py-2 pr-2 text-right">Pass</th>
+                <th className="py-2 pr-2">When</th>
+                <th className="py-2 pr-2 w-32">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.map(r => (
+                <tr key={r.id} className="border-b border-gray-100 dark:border-slate-800 hover:bg-gray-50 dark:hover:bg-slate-800/50">
+                  <td className="py-1.5"><input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} /></td>
+                  <td className="py-1.5 pr-2 font-mono">#{r.id}</td>
+                  <td className="py-1.5 pr-2">{r.playbook_name}</td>
+                  <td className="py-1.5 pr-2">{r.guardrail_display_name || r.guardrail_provider}</td>
+                  <td className="py-1.5 pr-2 text-right">{r.detection_rate}% <span className="text-xs text-gray-500">({r.detected}/{r.total})</span></td>
+                  <td className="py-1.5 pr-2 text-right">{r.pass_rate}%</td>
+                  <td className="py-1.5 pr-2 text-xs text-gray-500 dark:text-slate-400">{new Date(r.created_at).toLocaleString()}</td>
+                  <td className="py-1.5 pr-2">
+                    <button onClick={() => doViewDetail(r.id)}
+                      className="text-xs px-2 py-0.5 rounded bg-gray-100 dark:bg-slate-700 dark:text-slate-100 mr-1">View</button>
+                    <button onClick={() => doDelete(r.id)}
+                      className="text-xs px-2 py-0.5 rounded bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-300"><Trash2 className="w-3 h-3 inline" /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {compareData && <CompareModal data={compareData} onClose={() => setCompareData(null)} />}
+      {detailData && <DetailModal data={detailData} onClose={() => setDetailData(null)} />}
+    </div>
+  );
+};
+
+const CompareModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose }) => {
+  const runs: RunSummary[] = data.runs || [];
+  const prompts: any[] = data.prompts || [];
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+          <h3 className="font-semibold dark:text-slate-100">Compare {runs.length} runs · {prompts.length} prompts</h3>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-slate-200 text-xl leading-none">×</button>
+        </div>
+        <div className="p-4 overflow-auto flex-1">
+          {/* Aggregate summary */}
+          <table className="w-full text-sm mb-4 border border-gray-200 dark:border-slate-700">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-slate-800 text-left">
+                <th className="py-1 px-2 border-r dark:border-slate-700">Metric</th>
+                {runs.map(r => <th key={r.id} className="py-1 px-2 border-r dark:border-slate-700">#{r.id} · {r.guardrail_display_name || r.guardrail_provider}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td className="py-1 px-2 border-r dark:border-slate-700 font-medium">Playbook</td>{runs.map(r => <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700">{r.playbook_name}</td>)}</tr>
+              <tr><td className="py-1 px-2 border-r dark:border-slate-700 font-medium">Detection rate</td>{runs.map(r => <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700">{r.detection_rate}% ({r.detected}/{r.total})</td>)}</tr>
+              <tr><td className="py-1 px-2 border-r dark:border-slate-700 font-medium">Pass rate</td>{runs.map(r => <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700">{r.pass_rate}%</td>)}</tr>
+              <tr><td className="py-1 px-2 border-r dark:border-slate-700 font-medium">When</td>{runs.map(r => <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-xs">{new Date(r.created_at).toLocaleString()}</td>)}</tr>
+            </tbody>
+          </table>
+
+          {/* Per-prompt matrix */}
+          <table className="w-full text-xs border border-gray-200 dark:border-slate-700">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-slate-800 text-left">
+                <th className="py-1 px-2 border-r dark:border-slate-700 w-16">Prompt ID</th>
+                <th className="py-1 px-2 border-r dark:border-slate-700">Category</th>
+                <th className="py-1 px-2 border-r dark:border-slate-700">Prompt</th>
+                {runs.map(r => <th key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-center w-24">#{r.id}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {prompts.map(p => {
+                // Determine row coloring: all matched, divergence, all missed
+                const verdicts = runs.map(r => p.by_run?.[r.id]?.passed);
+                const allPassed = verdicts.every(v => v === true);
+                const allFailed = verdicts.every(v => v === false);
+                const rowBg = allPassed ? 'bg-green-50 dark:bg-green-900/20'
+                  : allFailed ? 'bg-red-50 dark:bg-red-900/20'
+                  : 'bg-yellow-50 dark:bg-yellow-900/20';
+                return (
+                  <tr key={p.id} className={`${rowBg} border-b border-gray-100 dark:border-slate-800`}>
+                    <td className="py-1 px-2 border-r dark:border-slate-700 font-mono">{p.id}</td>
+                    <td className="py-1 px-2 border-r dark:border-slate-700">{p.category}</td>
+                    <td className="py-1 px-2 border-r dark:border-slate-700 max-w-md truncate" title={p.prompt}>{p.prompt}</td>
+                    {runs.map(r => {
+                      const cell = p.by_run?.[r.id];
+                      if (!cell) return <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-center text-gray-400">—</td>;
+                      const ok = cell.passed;
+                      return <td key={r.id} className={`py-1 px-2 border-r dark:border-slate-700 text-center font-semibold ${ok ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>{ok ? 'PASS' : 'FAIL'}</td>;
+                    })}
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DetailModal: React.FC<{ data: any; onClose: () => void }> = ({ data, onClose }) => {
+  const results = data.results || [];
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="bg-white dark:bg-slate-900 rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
+        <div className="px-4 py-3 border-b border-gray-200 dark:border-slate-700 flex items-center justify-between">
+          <div>
+            <h3 className="font-semibold dark:text-slate-100">Run #{data.id} · {data.playbook_name}</h3>
+            <div className="text-xs text-gray-500 dark:text-slate-400 mt-0.5">
+              {data.guardrail_display_name || data.guardrail_provider} · {data.detection_rate}% detection · {data.pass_rate}% pass · {new Date(data.created_at).toLocaleString()}
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:hover:text-slate-200 text-xl leading-none">×</button>
+        </div>
+        <div className="p-4 overflow-auto flex-1">
+          <table className="w-full text-xs border border-gray-200 dark:border-slate-700">
+            <thead>
+              <tr className="bg-gray-50 dark:bg-slate-800 text-left">
+                <th className="py-1 px-2 border-r dark:border-slate-700 w-16">ID</th>
+                <th className="py-1 px-2 border-r dark:border-slate-700">Category</th>
+                <th className="py-1 px-2 border-r dark:border-slate-700">Prompt</th>
+                <th className="py-1 px-2 border-r dark:border-slate-700 w-20 text-center">Flagged</th>
+                <th className="py-1 px-2 border-r dark:border-slate-700 w-20 text-center">Verdict</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.map((r: any) => (
+                <tr key={r.id} className={`border-b border-gray-100 dark:border-slate-800 ${r.passed ? 'bg-green-50 dark:bg-green-900/20' : 'bg-red-50 dark:bg-red-900/20'}`}>
+                  <td className="py-1 px-2 border-r dark:border-slate-700 font-mono">{r.id}</td>
+                  <td className="py-1 px-2 border-r dark:border-slate-700">{r.category}</td>
+                  <td className="py-1 px-2 border-r dark:border-slate-700 max-w-md truncate" title={r.prompt}>{r.prompt}</td>
+                  <td className="py-1 px-2 border-r dark:border-slate-700 text-center">{r.flagged ? '✓' : '—'}</td>
+                  <td className={`py-1 px-2 border-r dark:border-slate-700 text-center font-semibold ${r.passed ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>{r.passed ? 'PASS' : 'FAIL'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };

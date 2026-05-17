@@ -389,6 +389,35 @@ class ApiService {
     return this.request(`/playbooks/${encodeURIComponent(id)}`, { method: 'DELETE' });
   }
 
+  // Playbook run history
+  async listPlaybookRuns(filters?: { playbook_slug?: string; guardrail_provider?: string; limit?: number }): Promise<{ runs: any[]; count: number }> {
+    const q = new URLSearchParams();
+    if (filters?.playbook_slug) q.set('playbook_slug', filters.playbook_slug);
+    if (filters?.guardrail_provider) q.set('guardrail_provider', filters.guardrail_provider);
+    if (filters?.limit) q.set('limit', String(filters.limit));
+    const qs = q.toString();
+    return this.request(`/playbook-runs${qs ? '?' + qs : ''}`);
+  }
+
+  async getPlaybookRun(id: number): Promise<any> {
+    return this.request(`/playbook-runs/${id}`);
+  }
+
+  async comparePlaybookRuns(ids: number[]): Promise<any> {
+    return this.request(`/playbook-runs/compare?ids=${ids.join(',')}`);
+  }
+
+  async deletePlaybookRun(id: number): Promise<{ deleted: number; id: number }> {
+    return this.request(`/playbook-runs/${id}`, { method: 'DELETE' });
+  }
+
+  async updatePlaybookRunNotes(id: number, notes: string): Promise<any> {
+    return this.request(`/playbook-runs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ notes }),
+    });
+  }
+
   // Recordings
   async listRecordings(): Promise<{ recordings: any[] }> {
     return this.request('/recordings');

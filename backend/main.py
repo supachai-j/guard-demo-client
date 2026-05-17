@@ -47,6 +47,7 @@ from .routes import config as _config_routes  # noqa: E402
 from .routes import conversations as _conversations_routes  # noqa: E402
 from .routes import demo_prompts as _demo_prompts_routes  # noqa: E402
 from .routes import lakera_legacy as _lakera_legacy_routes  # noqa: E402
+from .routes import playbook_runs as _playbook_runs_routes  # noqa: E402
 from .routes import playbooks as _playbooks_routes  # noqa: E402
 from .routes import rag as _rag_routes  # noqa: E402
 from .routes import recordings as _recordings_routes  # noqa: E402
@@ -68,6 +69,7 @@ app.include_router(_scenarios_routes.router)
 app.include_router(_lakera_legacy_routes.router)
 app.include_router(_recordings_routes.router)
 app.include_router(_playbooks_routes.router)
+app.include_router(_playbook_runs_routes.router)
 app.include_router(_audit_routes.router)
 app.include_router(_threat_lab_routes.router)
 

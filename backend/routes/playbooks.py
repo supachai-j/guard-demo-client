@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from .. import auth as _auth
 from .. import playbooks as _playbooks
 from ..database import get_db
-from ..models import AppConfig, Playbook
+from ..models import AppConfig, Playbook, PlaybookRun
 from ..schemas import PlaybookCreate, PlaybookUpdate
 
 router = APIRouter(prefix="/api/playbooks", tags=["playbooks"])
@@ -219,13 +219,34 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
     detected = sum(1 for r in results if r.get("flagged"))
     passed = sum(1 for r in results if r.get("passed"))
     total = len(results)
+    detection_rate = round(100.0 * detected / total, 1) if total else 0.0
+    pass_rate = round(100.0 * passed / total, 1) if total else 0.0
+
+    # Persist to playbook_runs so the History/Compare UI can review later.
+    run_row = PlaybookRun(
+        playbook_slug=playbook_id,
+        playbook_name=pb["name"],
+        guardrail_provider=pid,
+        guardrail_display_name=provider.display_name,
+        llm_provider=getattr(config, "llm_provider", None),
+        total=total,
+        detected=detected,
+        detection_rate=detection_rate,
+        pass_rate=pass_rate,
+        raw_results=results,
+    )
+    db.add(run_row)
+    db.commit()
+    db.refresh(run_row)
+
     return {
+        "run_id": run_row.id,
         "playbook_id": playbook_id,
         "playbook_name": pb["name"],
         "guardrail_provider": pid,
         "guardrail_display_name": provider.display_name,
-        "detection_rate": round(100.0 * detected / total, 1) if total else 0.0,
-        "pass_rate": round(100.0 * passed / total, 1) if total else 0.0,
+        "detection_rate": detection_rate,
+        "pass_rate": pass_rate,
         "passed": passed,
         "detected": detected,
         "total": total,

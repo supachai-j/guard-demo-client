@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, Integer, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 
 Base = declarative_base()
@@ -204,3 +204,24 @@ class SessionRecording(Base):
     notes = Column(Text, nullable=True)
     events = Column(JSON, default=[])  # [{ts, type, prompt, response, lakera}]
     created_at = Column(DateTime, default=datetime.utcnow)
+
+
+class PlaybookRun(Base):
+    """One row per `POST /api/playbooks/{id}/run` execution. Persists the
+    full result so users can review history, compare across guardrail
+    providers, and detect regressions when vendor models update."""
+    __tablename__ = "playbook_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    playbook_slug = Column(String, index=True)
+    playbook_name = Column(String)
+    guardrail_provider = Column(String, index=True)
+    guardrail_display_name = Column(String, nullable=True)
+    llm_provider = Column(String, nullable=True)
+    total = Column(Integer, default=0)
+    detected = Column(Integer, default=0)
+    detection_rate = Column(Float, default=0.0)
+    pass_rate = Column(Float, default=0.0)
+    raw_results = Column(JSON, default=[])  # full per-prompt verdicts + breakdown
+    notes = Column(Text, nullable=True)  # user-editable annotation
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
