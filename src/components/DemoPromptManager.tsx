@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Edit, Trash2, Search, Tag, Shield, ShieldAlert } from 'lucide-react';
+import { Plus, Edit, Trash2, Search, Tag, ShieldAlert } from 'lucide-react';
 import { DemoPrompt, DemoPromptCreate, DemoPromptUpdate } from '../types';
 import { apiService } from '../services/api';
 
@@ -149,7 +149,7 @@ const DemoPromptManager: React.FC = () => {
                     <div className="flex items-center space-x-2 mb-2">
                       <h3 className="font-medium text-gray-900">{prompt.title}</h3>
                       {prompt.is_malicious && (
-                        <ShieldAlert className="w-4 h-4 text-red-500" title="Malicious prompt" />
+                        <span title="Malicious prompt"><ShieldAlert className="w-4 h-4 text-red-500" /></span>
                       )}
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         prompt.category === 'security' ? 'bg-red-100 text-red-800' :
