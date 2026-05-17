@@ -159,9 +159,15 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         # Some hosted Thai LLM gateways are open and don't require a key, so we
         # don't hard-block calls when the key is empty (mirrors litellm_proxy).
         "needs_key": False,
-        # Empty: model list is fetched dynamically from /v1/models when the
-        # endpoint exposes it; operator can also pin a model name manually.
-        "models": [],
+        # Static fallback list — verified against /v1/models on 2026-05-17.
+        # llm_client.get_models() also dynamically fetches /v1/models when
+        # available so this list will be refreshed at call time.
+        "models": [
+            "OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2",
+            "Typhoon-S-ThaiLLM-8B-Instruct",
+            "Pathumma-ThaiLLM-qwen3-8b-think-3.0.0",
+            "THaLLE-0.2-ThaiLLM-8B-fa",
+        ],
     },
     "portkey": {
         "display_name": "Portkey (AI Gateway)",
