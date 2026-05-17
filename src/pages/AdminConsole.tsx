@@ -317,8 +317,11 @@ const AdminConsole: React.FC = () => {
       }
 
       await apiService.updateConfig(payload);
-      await loadConfig();
-      await loadModels();
+      // Refresh everything that derives from AppConfig: the config snapshot
+      // itself, model list (depends on active LLM provider), and the
+      // provider catalogs (their `enabled`/`is_active` flags come from
+      // backend's augment of disabled_providers + active_id).
+      await Promise.all([loadConfig(), loadModels(), loadProviders()]);
       setMessage({ type: 'success', text: 'Configuration updated successfully' });
     } catch (error: any) {
       console.error('Failed to update config:', error);
