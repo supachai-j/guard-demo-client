@@ -27,7 +27,6 @@ const AdminConsole: React.FC = () => {
   const [ragScanningResult, setRagScanningResult] = useState<any>(null);
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
-  const [showProviderKey, setShowProviderKey] = useState(false);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [guardrailProviders, setGuardrailProviders] = useState<GuardrailProviderInfo[]>([]);
   const [revealedSecrets, setRevealedSecrets] = useState<Record<string, boolean>>({});
@@ -755,111 +754,28 @@ const AdminConsole: React.FC = () => {
             <fieldset disabled={!!config?.provider_config_locked} className={`space-y-6 border-0 p-0 m-0 min-w-0 ${config?.provider_config_locked ? 'opacity-70' : ''}`}>
               <h2 className="text-lg font-semibold text-gray-900">LLM Configuration</h2>
 
-              {/* Provider + key + (optional) base URL — moved here from Security so
-                  provider + model live together. */}
+              {/* Active provider summary only — provider selection + API key
+                  + base URL all live in the Providers tab now. This tab is
+                  for "how the active LLM behaves" (model, temperature,
+                  system prompt) — separation of concerns. */}
               {(() => {
                 const activeProviderId = config.llm_provider || (config.use_litellm ? 'litellm_proxy' : 'openai');
                 const activeProvider = providers.find((p) => p.id === activeProviderId);
-                const keyField = activeProvider?.key_field as keyof AppConfig | null | undefined;
-                const baseField = activeProvider?.base_url_field as keyof AppConfig | null | undefined;
-                const keyValue = keyField ? ((config as any)[keyField] as string | undefined) : undefined;
-                const baseValue = baseField ? ((config as any)[baseField] as string | undefined) : undefined;
                 return (
-                  <div className="space-y-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                  <div className="p-4 bg-gray-50 dark:bg-slate-800/50 rounded-lg border border-gray-200 dark:border-slate-700 flex items-center justify-between">
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-2">
-                        LLM Provider
-                      </label>
-                      <select
-                        value={activeProviderId}
-                        onChange={(e) => handleConfigUpdate({ llm_provider: e.target.value })}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                      >
-                        {providers.length === 0 ? (
-                          <option value={activeProviderId}>{activeProviderId}</option>
-                        ) : (
-                          providers.map((p) => (
-                            <option key={p.id} value={p.id}>{p.display_name}</option>
-                          ))
-                        )}
-                      </select>
-                      <p className="text-xs text-gray-500 mt-1">
-                        Each provider stores its own key, so switching back and forth doesn&apos;t require re-entering credentials.
-                      </p>
+                      <div className="text-xs text-gray-500 dark:text-slate-400 uppercase tracking-wide">Active LLM Provider</div>
+                      <div className="font-medium text-gray-900 dark:text-slate-100 mt-0.5">
+                        {activeProvider?.display_name || activeProviderId}
+                      </div>
                     </div>
-
-                    {baseField && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          {activeProviderId === 'ollama' ? 'Ollama base URL' : 'LiteLLM base URL'}
-                        </label>
-                        <input
-                          type="text"
-                          value={baseValue || activeProvider?.default_base_url || ''}
-                          onChange={(e) => handleConfigUpdate({ [baseField]: e.target.value } as any)}
-                          placeholder={activeProvider?.default_base_url || ''}
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                      </div>
-                    )}
-
-                    {activeProviderId === 'portkey' && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          Portkey virtual key (optional)
-                        </label>
-                        <input
-                          type="text"
-                          value={config.portkey_virtual_key || ''}
-                          onChange={(e) => handleConfigUpdate({ portkey_virtual_key: e.target.value })}
-                          placeholder="vk-..."
-                          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                        />
-                        <p className="text-xs text-gray-500 mt-1">
-                          Portkey&apos;s virtual key abstracts the upstream provider (OpenAI/Anthropic/etc.). Leave empty if your Portkey config routes by other means.
-                        </p>
-                      </div>
-                    )}
-
-                    {keyField && (
-                      <div>
-                        <label className="block text-sm font-medium text-gray-700 mb-2">
-                          {activeProvider?.display_name} API key
-                          {!activeProvider?.needs_key && (
-                            <span className="ml-2 text-xs text-gray-500">(optional)</span>
-                          )}
-                        </label>
-                        <div className="relative">
-                          <input
-                            type={showProviderKey ? 'text' : 'password'}
-                            value={keyValue || ''}
-                            onChange={(e) => handleConfigUpdate({ [keyField]: e.target.value } as any)}
-                            placeholder={
-                              activeProviderId === 'openai' ? 'sk-...' :
-                              activeProviderId === 'anthropic' ? 'sk-ant-...' :
-                              activeProviderId === 'google' ? 'AIza...' :
-                              activeProviderId === 'litellm_proxy' ? 'sk-... (master or virtual) or leave empty' :
-                              activeProviderId === 'openrouter' ? 'sk-or-...' :
-                              'API key'
-                            }
-                            className="w-full px-3 py-2 pr-10 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => setShowProviderKey(!showProviderKey)}
-                            className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 hover:text-gray-600"
-                          >
-                            {showProviderKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {!keyField && !baseField && (
-                      <p className="text-xs text-gray-500">
-                        This provider doesn&apos;t require any extra credentials in this app.
-                      </p>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('providers')}
+                      className="px-3 py-1.5 text-sm rounded bg-gray-100 dark:bg-slate-700 dark:text-slate-100 hover:bg-gray-200 dark:hover:bg-slate-600"
+                    >
+                      Manage in Providers tab →
+                    </button>
                   </div>
                 );
               })()}
