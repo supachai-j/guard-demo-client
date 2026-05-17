@@ -5,15 +5,18 @@ This router exposes read/compare views so the UI can show history
 across runs and side-by-side compare across guardrail providers.
 """
 
+import asyncio
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import auth as _auth
+from .. import playbooks as _builtin_playbooks
 from ..database import get_db
-from ..models import PlaybookRun
+from ..models import AppConfig, Playbook, PlaybookRun
 
 router = APIRouter(prefix="/api/playbook-runs", tags=["playbook-runs"])
 
@@ -49,6 +52,155 @@ async def list_runs(
         q = q.filter(PlaybookRun.guardrail_provider == guardrail_provider)
     rows = q.order_by(PlaybookRun.created_at.desc()).limit(limit).all()
     return {"runs": [_summary(r) for r in rows], "count": len(rows)}
+
+
+class MultiProviderRunRequest(BaseModel):
+    playbook_id: str
+    provider_ids: List[str]
+
+
+@router.post("/multi-provider", dependencies=[Depends(_auth.require_admin)])
+async def run_multi_provider(payload: MultiProviderRunRequest, db: Session = Depends(get_db)):
+    """Fan a playbook across N selected guardrail providers in one call.
+
+    Saves one PlaybookRun row per provider (so they appear in Run History) and
+    returns the same shape as `/compare` (runs + per-prompt matrix) so the UI
+    can render comparison immediately without a second roundtrip.
+
+    Active provider config is NOT changed — we resolve each provider from
+    GUARDRAIL_PROVIDERS and call `check_interaction(cfg=config)` directly,
+    same pattern as `/api/chat/compare-guardrails`.
+    """
+    from ..guardrail_provider import GUARDRAIL_PROVIDERS
+
+    if not payload.provider_ids:
+        raise HTTPException(status_code=400, detail="provider_ids must be non-empty")
+    if len(payload.provider_ids) > 6:
+        raise HTTPException(status_code=400, detail="max 6 providers per fan-out")
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+
+    # Resolve playbook (built-in or custom)
+    pb_dict = None
+    if _builtin_playbooks.is_builtin(payload.playbook_id):
+        pb_dict = _builtin_playbooks.get_playbook(payload.playbook_id)
+    else:
+        row = db.query(Playbook).filter(Playbook.slug == payload.playbook_id).first()
+        if row:
+            pb_dict = {
+                "id": row.slug,
+                "name": row.name,
+                "description": row.description,
+                "prompts": row.prompts or [],
+            }
+    if not pb_dict:
+        raise HTTPException(status_code=404, detail=f"Playbook '{payload.playbook_id}' not found")
+
+    def _verdict(flagged: bool, expected: Optional[str]) -> bool:
+        if expected == "allowed":
+            return not flagged
+        return flagged
+
+    async def _scan_one(provider, item):
+        try:
+            status = await provider.check_interaction(
+                messages=[{"role": "user", "content": item["prompt"]}],
+                cfg=config,
+                meta=None,
+                system_prompt=config.system_prompt,
+            )
+            flagged = bool(status and status.get("flagged"))
+            return {
+                "id": item["id"],
+                "category": item.get("category"),
+                "prompt": item["prompt"],
+                "expected": item.get("expected"),
+                "flagged": flagged,
+                "passed": _verdict(flagged, item.get("expected")),
+                "breakdown": (status or {}).get("breakdown") or [],
+            }
+        except Exception as e:
+            return {
+                "id": item["id"],
+                "category": item.get("category"),
+                "prompt": item["prompt"],
+                "expected": item.get("expected"),
+                "flagged": False,
+                "passed": False,
+                "error": str(e),
+            }
+
+    async def _run_provider(pid: str):
+        provider = GUARDRAIL_PROVIDERS.get(pid)
+        if not provider:
+            return None, {"error": f"unknown provider '{pid}'"}
+        if not provider.is_configured(config):
+            return None, {"error": f"provider '{pid}' not configured"}
+        results = await asyncio.gather(*[_scan_one(provider, p) for p in pb_dict["prompts"]])
+        detected = sum(1 for r in results if r.get("flagged"))
+        passed = sum(1 for r in results if r.get("passed"))
+        total = len(results)
+        row = PlaybookRun(
+            playbook_slug=payload.playbook_id,
+            playbook_name=pb_dict["name"],
+            guardrail_provider=pid,
+            guardrail_display_name=provider.display_name,
+            llm_provider=getattr(config, "llm_provider", None),
+            total=total,
+            detected=detected,
+            detection_rate=round(100.0 * detected / total, 1) if total else 0.0,
+            pass_rate=round(100.0 * passed / total, 1) if total else 0.0,
+            raw_results=results,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        return row, None
+
+    # Run providers sequentially to avoid DB write race; per-prompt is still
+    # parallel within each provider.
+    created_rows: List[PlaybookRun] = []
+    errors: List[dict] = []
+    for pid in payload.provider_ids:
+        row, err = await _run_provider(pid)
+        if row:
+            created_rows.append(row)
+        elif err:
+            errors.append({"provider": pid, **err})
+
+    # Build per-prompt matrix (same shape as /compare endpoint)
+    prompts_index: dict = {}
+    for run in created_rows:
+        for r in (run.raw_results or []):
+            pid_key = r.get("id")
+            if pid_key is None:
+                continue
+            if pid_key not in prompts_index:
+                prompts_index[pid_key] = {
+                    "id": pid_key,
+                    "category": r.get("category"),
+                    "prompt": r.get("prompt"),
+                    "expected": r.get("expected"),
+                    "by_run": {},
+                }
+            # Use string key explicitly so JSON consumers see consistent
+            # string-typed keys (Python int dict keys serialize to JSON
+            # strings anyway, but explicit is safer for typed clients).
+            prompts_index[pid_key]["by_run"][str(run.id)] = {
+                "flagged": r.get("flagged"),
+                "passed": r.get("passed"),
+                "error": r.get("error"),
+            }
+
+    return {
+        "playbook_id": payload.playbook_id,
+        "playbook_name": pb_dict["name"],
+        "runs": [_summary(r) for r in created_rows],
+        "prompts": list(prompts_index.values()),
+        "errors": errors,
+    }
 
 
 @router.get("/compare", dependencies=[Depends(_auth.require_admin)])

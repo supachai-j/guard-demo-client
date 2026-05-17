@@ -407,6 +407,13 @@ class ApiService {
     return this.request(`/playbook-runs/compare?ids=${ids.join(',')}`);
   }
 
+  async runPlaybookMultiProvider(playbook_id: string, provider_ids: string[]): Promise<any> {
+    return this.request('/playbook-runs/multi-provider', {
+      method: 'POST',
+      body: JSON.stringify({ playbook_id, provider_ids }),
+    });
+  }
+
   async deletePlaybookRun(id: number): Promise<{ deleted: number; id: number }> {
     return this.request(`/playbook-runs/${id}`, { method: 'DELETE' });
   }
