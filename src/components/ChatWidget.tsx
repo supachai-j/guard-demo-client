@@ -69,7 +69,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
       try {
         const result = await apiService.getLastLakeraResult();
         setLastLakeraResult(result);
-      } catch (error) {
+      } catch {
         // No existing Lakera result, that's fine
       }
     };

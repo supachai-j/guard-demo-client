@@ -119,7 +119,7 @@ const AdminConsole: React.FC = () => {
           }
           setRagScanningProgress(null);
         }
-      } catch (error) {
+      } catch {
         // No progress available, clear it and stop polling
         setRagScanningProgress(null);
         if (intervalId) {
@@ -275,7 +275,7 @@ const AdminConsole: React.FC = () => {
       } else {
         setRagScanningNotificationCount(0);
       }
-    } catch (error) {
+    } catch {
       // No result available yet, that's okay
       setRagScanningResult(null);
       setRagScanningNotificationCount(0);

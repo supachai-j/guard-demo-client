@@ -66,7 +66,6 @@ jobs:
 
       - name: ESLint
         run: npm run lint
-        continue-on-error: true
 
   python-deps:
     name: Python dependency audit (pip-audit)
@@ -83,6 +82,9 @@ jobs:
   npm-deps:
     name: npm dependency audit
     runs-on: ubuntu-latest
+    # Hard-gated: as of 2026-05-17, package-lock is on a CVE-clean baseline
+    # for high+severity findings. New high-severity vulnerabilities should
+    # block the PR so Dependabot has a chance to fix them before main.
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -92,7 +94,6 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: npm audit (high+)
         run: npm audit --audit-level=high
-        continue-on-error: true
 
   secrets:
     name: Secret scan (gitleaks)

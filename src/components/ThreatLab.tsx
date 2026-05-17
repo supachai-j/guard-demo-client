@@ -327,7 +327,6 @@ const PlaybookPanel: React.FC = () => {
 
   useEffect(() => {
     reloadCatalog();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const run = async () => {
