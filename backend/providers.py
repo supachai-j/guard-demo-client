@@ -156,9 +156,12 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
         # OpenAI-compatible (POST /v1/chat/completions + Bearer key); routed
         # via LiteLLM's openai custom_llm_provider — see _build_litellm_kwargs.
         "litellm_prefix": "",
-        # Some hosted Thai LLM gateways are open and don't require a key, so we
-        # don't hard-block calls when the key is empty (mirrors litellm_proxy).
-        "needs_key": False,
+        # Kong key-auth plugin in front of the cluster — chat completions
+        # return 401 "No API key found" if `apikey:` header is missing. The
+        # llm_client dispatch path injects that header for us; setting
+        # needs_key=True enforces key presence so we fail fast in the UI
+        # instead of silently dispatching a request that the gateway will block.
+        "needs_key": True,
         # Static fallback list — verified against /v1/models on 2026-05-17.
         # llm_client.get_models() also dynamically fetches /v1/models when
         # available so this list will be refreshed at call time.

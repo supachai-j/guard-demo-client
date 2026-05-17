@@ -179,6 +179,13 @@ def _build_litellm_kwargs(
         # entered the bare host URL (same convenience as litellm_proxy).
         if base_url and not base_url.rstrip("/").endswith("/v1"):
             kwargs["api_base"] = f"{base_url.rstrip('/')}/v1"
+        # Kong key-auth plugin in front of the cluster expects the key in an
+        # `apikey:` header (NOT `Authorization: Bearer`). LiteLLM's openai
+        # provider sets Bearer from the api_key kwarg by default; Kong ignores
+        # that, so we inject the custom header. Leaving api_key kwarg in place
+        # is harmless — Bearer is sent but Kong looks at apikey first.
+        if api_key:
+            kwargs["extra_headers"] = {"apikey": api_key}
         kwargs["custom_llm_provider"] = "openai"
     elif pid == "portkey":
         # Portkey is OpenAI-compatible; auth via x-portkey-api-key + optional virtual key.
