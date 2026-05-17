@@ -15,7 +15,7 @@ import { useUI } from '../i18n/UIContext';
 import { useAuth } from '../auth/AuthContext';
 import { LogOut } from 'lucide-react';
 
-type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'prompts' | 'threat-lab' | 'export';
+type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'providers' | 'prompts' | 'threat-lab' | 'export';
 
 const AdminConsole: React.FC = () => {
   const { t } = useUI();
@@ -435,6 +435,7 @@ const AdminConsole: React.FC = () => {
     { id: 'rag-scanning', label: t('tabRagScanning'), ...(ragScanningNotificationCount > 0 && { notificationCount: ragScanningNotificationCount }) },
     { id: 'tools', label: t('tabTools') },
     { id: 'security', label: t('tabSecurity') },
+    { id: 'providers', label: 'Providers' },
     { id: 'prompts', label: t('tabPrompts') },
     { id: 'threat-lab', label: 'Threat Lab' },
     { id: 'export', label: t('tabExport') },
@@ -1440,6 +1441,18 @@ const AdminConsole: React.FC = () => {
             </fieldset>
           )}
 
+          {activeTab === 'providers' && (
+            <ProvidersTab
+              providers={providers}
+              guardrailProviders={guardrailProviders}
+              config={config}
+              onConfigUpdate={handleConfigUpdate}
+              onActivate={(kind, id) => handleConfigUpdate(
+                kind === 'llm' ? { llm_provider: id } : { guardrail_provider: id }
+              )}
+            />
+          )}
+
           {activeTab === 'prompts' && (
             <div className="space-y-6">
               <DemoPromptManager />
@@ -1574,6 +1587,149 @@ const AdminConsole: React.FC = () => {
           ragManagementRef.current?.refresh();
         }}
       />
+    </div>
+  );
+};
+
+// ─────────────────────────────────────────────────────────────────
+// Providers tab — unified provider management (LLM + Guardrail)
+//
+// Per row: status badge, active radio, enable/disable toggle. Edit of
+// individual keys still lives on the LLM/Security tabs (link out) — we
+// don't duplicate per-provider key forms here yet.
+// ─────────────────────────────────────────────────────────────────
+
+interface ProvidersTabProps {
+  providers: (ProviderInfo & { enabled?: boolean; is_active?: boolean })[];
+  guardrailProviders: (GuardrailProviderInfo & { enabled?: boolean; is_active?: boolean })[];
+  config: AppConfig;
+  onConfigUpdate: (updates: Partial<AppConfigUpdate>) => Promise<void>;
+  onActivate: (kind: 'llm' | 'guardrail', id: string) => Promise<void>;
+}
+
+const ProvidersTab: React.FC<ProvidersTabProps> = ({
+  providers, guardrailProviders, config, onConfigUpdate, onActivate,
+}) => {
+  const locked = !!config.provider_config_locked;
+  const disabledList: string[] = (config as any).disabled_providers || [];
+
+  const toggleEnabled = async (id: string, currentEnabled: boolean) => {
+    const next = currentEnabled
+      ? [...disabledList, id]
+      : disabledList.filter(x => x !== id);
+    await onConfigUpdate({ disabled_providers: next } as any);
+  };
+
+  const isConfiguredLLM = (p: ProviderInfo): boolean => {
+    if (p.needs_key === false) return true;
+    if (!p.key_field) return true;
+    return Boolean((config as any)[p.key_field]);
+  };
+  const isConfiguredGuard = (p: GuardrailProviderInfo): boolean => {
+    // All listed guardrail providers need at least one key field set
+    const cfg = config as any;
+    switch (p.id) {
+      case 'lakera': return Boolean(cfg.lakera_api_key);
+      case 'openai_moderation': return Boolean(cfg.openai_api_key);
+      case 'bedrock': return Boolean(cfg.bedrock_access_key_id && cfg.bedrock_secret_access_key);
+      case 'azure_content_safety': return Boolean(cfg.azure_content_safety_endpoint && cfg.azure_content_safety_key);
+      case 'palo_alto_airs': return Boolean(cfg.palo_alto_api_key);
+      case 'cloudflare_firewall_ai': return Boolean(cfg.cloudflare_account_id && cfg.cloudflare_api_token);
+      default: return false;
+    }
+  };
+
+  const renderRow = (
+    p: { id: string; display_name: string; enabled?: boolean; is_active?: boolean },
+    kind: 'llm' | 'guardrail',
+    configured: boolean,
+  ) => {
+    const enabled = p.enabled !== false;
+    const isActive = !!p.is_active;
+    const statusBadge = !configured
+      ? <span className="px-2 py-0.5 text-xs rounded bg-gray-100 text-gray-600 dark:bg-slate-700 dark:text-slate-300">no key</span>
+      : !enabled
+      ? <span className="px-2 py-0.5 text-xs rounded bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-200">disabled</span>
+      : <span className="px-2 py-0.5 text-xs rounded bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200">configured</span>;
+    return (
+      <tr key={p.id} className="border-b border-gray-100 dark:border-slate-800">
+        <td className="py-2 px-3">
+          <div className="font-medium text-gray-900 dark:text-slate-100">{p.display_name}</div>
+          <div className="text-xs text-gray-500 dark:text-slate-400 font-mono">{p.id}</div>
+        </td>
+        <td className="py-2 px-3">{statusBadge}</td>
+        <td className="py-2 px-3 text-center">
+          <input
+            type="radio"
+            name={`active-${kind}`}
+            checked={isActive}
+            disabled={locked || !configured || !enabled}
+            onChange={() => onActivate(kind, p.id)}
+            title={!configured ? 'Configure key first' : !enabled ? 'Enable first' : isActive ? 'Currently active' : 'Make active'}
+          />
+        </td>
+        <td className="py-2 px-3 text-center">
+          <button
+            type="button"
+            disabled={locked}
+            onClick={() => toggleEnabled(p.id, enabled)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${
+              enabled ? 'bg-green-600' : 'bg-gray-300 dark:bg-slate-600'
+            } ${locked ? 'opacity-50 cursor-not-allowed' : ''}`}
+            title={enabled ? 'Click to disable' : 'Click to enable'}
+          >
+            <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enabled ? 'translate-x-4' : 'translate-x-0.5'}`} />
+          </button>
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Provider Management</h2>
+        <p className="text-sm text-gray-600 dark:text-slate-400 mt-1">
+          One place to manage LLM and Guardrail providers. Toggle <strong>Enabled</strong> to include/exclude
+          from runtime fan-out (compare, matrix, health). Use the <strong>Active</strong> radio to pick which
+          one handles the live chat flow. Configure keys in the <a href="#" onClick={(e) => { e.preventDefault(); const _evt = new CustomEvent('admin-go-tab', { detail: 'llm' }); window.dispatchEvent(_evt); }} className="underline">LLM</a> and <a href="#" onClick={(e) => { e.preventDefault(); const _evt = new CustomEvent('admin-go-tab', { detail: 'security' }); window.dispatchEvent(_evt); }} className="underline">Security</a> tabs.
+        </p>
+        {locked && (
+          <div className="mt-2 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-800">
+            🔒 Provider config is locked — Enable/Disable + Active changes blocked. Unlock from LLM/Security tab.
+          </div>
+        )}
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-gray-900 dark:text-slate-200 mb-2">LLM Providers ({providers.length})</h3>
+        <table className="w-full text-sm border border-gray-200 dark:border-slate-700 rounded">
+          <thead className="bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300">
+            <tr>
+              <th className="py-2 px-3 text-left">Provider</th>
+              <th className="py-2 px-3 text-left w-32">Status</th>
+              <th className="py-2 px-3 text-center w-24">Active</th>
+              <th className="py-2 px-3 text-center w-24">Enabled</th>
+            </tr>
+          </thead>
+          <tbody>{providers.map(p => renderRow(p, 'llm', isConfiguredLLM(p)))}</tbody>
+        </table>
+      </div>
+
+      <div>
+        <h3 className="font-semibold text-gray-900 dark:text-slate-200 mb-2">Guardrail Providers ({guardrailProviders.length})</h3>
+        <table className="w-full text-sm border border-gray-200 dark:border-slate-700 rounded">
+          <thead className="bg-gray-50 dark:bg-slate-800 text-gray-700 dark:text-slate-300">
+            <tr>
+              <th className="py-2 px-3 text-left">Provider</th>
+              <th className="py-2 px-3 text-left w-32">Status</th>
+              <th className="py-2 px-3 text-center w-24">Active</th>
+              <th className="py-2 px-3 text-center w-24">Enabled</th>
+            </tr>
+          </thead>
+          <tbody>{guardrailProviders.map(p => renderRow(p, 'guardrail', isConfiguredGuard(p)))}</tbody>
+        </table>
+      </div>
     </div>
   );
 };

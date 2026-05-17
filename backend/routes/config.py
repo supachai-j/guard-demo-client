@@ -55,6 +55,9 @@ PROVIDER_CONFIG_FIELDS = frozenset([
     "azure_content_safety_endpoint", "azure_content_safety_key",
     "palo_alto_api_key", "palo_alto_profile_name", "palo_alto_host",
     "cloudflare_account_id", "cloudflare_api_token", "cloudflare_gateway_id",
+    # Operator disable-list — also locked when in demo mode (key change
+    # and enable/disable are both "provider config" from the operator's POV)
+    "disabled_providers",
 ])
 
 EXPORT_SECTIONS = {
@@ -122,6 +125,28 @@ async def update_config(config_update: AppConfigUpdate, db: Session = Depends(ge
     # Update fields
     for field, value in payload.items():
         setattr(config, field, value)
+
+    # Refuse to make a disabled provider active. Catches both directions:
+    # (a) user picked an already-disabled provider as new active, and
+    # (b) user added the currently-active provider to disabled_providers
+    # without flipping active to something else.
+    disabled_set = set(config.disabled_providers or [])
+    if config.llm_provider and config.llm_provider in disabled_set:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot set LLM provider '{config.llm_provider}' active while it is disabled. "
+                f"Enable it first, or pick a different active LLM provider."
+            ),
+        )
+    if config.guardrail_provider and config.guardrail_provider in disabled_set:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Cannot set guardrail provider '{config.guardrail_provider}' active while it is disabled. "
+                f"Enable it first, or pick a different active guardrail provider."
+            ),
+        )
 
     # Keep legacy use_litellm flag in sync with the new provider selector.
     if config.llm_provider == "litellm_proxy":

@@ -74,6 +74,11 @@ class AppConfig(Base):
     # provider selection) are read-only via the API. Toggle itself is always
     # changeable so the operator can unlock when the demo ends.
     provider_config_locked = Column(Boolean, default=False)
+    # Operator-disabled providers (separate from "not configured"). Provider
+    # IDs in this list are hidden from runtime fan-out (compare, matrix,
+    # health) and cannot be set as active. Keys stay saved — re-enable
+    # doesn't require re-entry. JSON-encoded list of strings.
+    disabled_providers = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

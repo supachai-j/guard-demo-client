@@ -177,8 +177,11 @@ async def health_providers(db: Session = Depends(get_db)):
                     "configured": True, "ok": False,
                     "latency_ms": int((_t.monotonic() - t0) * 1000), "error": str(e)[:200]}
 
-    llm_tasks = [_llm_check(pid) for pid in PROVIDERS.keys()]
-    guard_tasks = [_guard_check(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items()]
+    # Exclude operator-disabled providers from the health roll-up — they're
+    # intentionally turned off so reporting them as "down" is noise.
+    disabled = set(getattr(config, "disabled_providers", None) or [])
+    llm_tasks = [_llm_check(pid) for pid in PROVIDERS.keys() if pid not in disabled]
+    guard_tasks = [_guard_check(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items() if pid not in disabled]
     results = await asyncio.gather(*(llm_tasks + guard_tasks), return_exceptions=False)
     return {"providers": results}
 
@@ -330,7 +333,10 @@ async def compare_guardrails(request: ChatRequest, db: Session = Depends(get_db)
                 "warnings": [],
             }
 
-    tasks = [_run_one(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items()]
+    # Skip operator-disabled providers — exact same reasoning as the health
+    # endpoint: "disabled" means "stop showing me this".
+    disabled = set(getattr(config, "disabled_providers", None) or [])
+    tasks = [_run_one(pid, p) for pid, p in GUARDRAIL_PROVIDERS.items() if pid not in disabled]
     results = await asyncio.gather(*tasks)
     return {"message": request.message, "results": results}
 

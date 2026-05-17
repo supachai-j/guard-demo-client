@@ -62,6 +62,7 @@ class AppConfigResponse(AppConfigBase):
     cloudflare_gateway_id: Optional[str] = None
     webhook_url: Optional[str] = None
     provider_config_locked: bool = False
+    disabled_providers: list = []
     created_at: datetime
     updated_at: datetime
 
@@ -105,6 +106,10 @@ class AppConfigUpdate(AppConfigBase):
     # Demo-safe lock: when True, provider-related fields are read-only via PUT
     # /api/config and POST /api/config/import. Toggle itself always changeable.
     provider_config_locked: Optional[bool] = None
+    # Operator-disabled providers (subset of known provider IDs). When a
+    # provider's ID is in this list it's excluded from runtime fan-out and
+    # cannot be set as active.
+    disabled_providers: Optional[list] = None
 
 
 # Chat schemas

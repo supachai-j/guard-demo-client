@@ -152,12 +152,19 @@ async def _run_playbook_against_providers(
                     "expected": item.get("expected"), "flagged": False, "passed": False, "error": str(e),
                 }
 
+    disabled_set = set(getattr(config, "disabled_providers", None) or [])
     created_rows: List[PlaybookRun] = []
     errors: List[dict] = []
     for pid in provider_ids:
         provider = GUARDRAIL_PROVIDERS.get(pid)
         if not provider:
             errors.append({"provider": pid, "error": f"unknown provider '{pid}'"})
+            continue
+        if pid in disabled_set:
+            # User explicitly picked a provider they've disabled — flag it
+            # rather than silently skipping, since a checkbox they ticked
+            # shouldn't quietly do nothing.
+            errors.append({"provider": pid, "error": f"provider '{pid}' is disabled — enable it in Providers tab to use it"})
             continue
         if not provider.is_configured(config):
             errors.append({"provider": pid, "error": f"provider '{pid}' not configured"})

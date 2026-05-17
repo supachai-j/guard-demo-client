@@ -101,6 +101,13 @@ _MIGRATIONS = [
     # Demo-safe lock: when ON, provider config CRUD is read-only via the API.
     # Default 0 so existing installs keep working unchanged.
     Migration("app_config", "provider_config_locked", "BOOLEAN DEFAULT 0"),
+    # Operator-disabled providers (JSON list of provider IDs). SQLite stores
+    # JSON as TEXT; SQLAlchemy serializes/deserializes via JSON type. Empty
+    # list default so existing installs see no providers disabled.
+    Migration(
+        "app_config", "disabled_providers", "TEXT",
+        backfill="UPDATE app_config SET disabled_providers = '[]' WHERE disabled_providers IS NULL",
+    ),
 ]
 
 
