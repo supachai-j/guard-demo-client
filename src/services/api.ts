@@ -86,7 +86,10 @@ class ApiService {
     return this.request<AppConfig>('/config');
   }
 
-  async updateConfig(config: AppConfigUpdate): Promise<{ message: string }> {
+  async updateConfig(config: Partial<AppConfigUpdate>): Promise<{ message: string }> {
+    // Backend uses Pydantic's exclude_unset=True — sending only the fields
+    // that actually need to change is correct and required for the demo-safe
+    // lock's value-comparison check (commit e16e61c).
     return this.request<{ message: string }>('/config', {
       method: 'PUT',
       body: JSON.stringify(config),

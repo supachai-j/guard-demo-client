@@ -304,64 +304,27 @@ const AdminConsole: React.FC = () => {
     if (!config) return;
 
     try {
-      // If Lakera is being disabled, also disable RAG content scanning
-      const lakeraEnabled = updates.lakera_enabled ?? config.lakera_enabled;
-      const ragContentScanning = lakeraEnabled 
-        ? (updates.rag_content_scanning ?? config.rag_content_scanning)
-        : false;
+      // Send only the fields the caller actually changed. Backend uses
+      // Pydantic's exclude_unset=True so absent fields stay as-is, and the
+      // demo-safe lock's value-comparison check (commit e16e61c) needs the
+      // diff to be minimal. The old enumeration pattern dropped any new
+      // field that wasn't in the hardcoded list — silently broke the lock
+      // toggle and the Providers-tab Enabled toggle for several commits.
+      const payload: Partial<AppConfigUpdate> = { ...updates };
+      // Legacy invariant: turning Lakera off also turns RAG scanning off.
+      if (updates.lakera_enabled === false) {
+        payload.rag_content_scanning = false;
+      }
 
-      const updatedConfig: AppConfigUpdate = {
-        business_name: updates.business_name ?? config.business_name,
-        tagline: updates.tagline ?? config.tagline,
-        hero_text: updates.hero_text ?? config.hero_text,
-        hero_image_url: updates.hero_image_url ?? config.hero_image_url,
-        logo_url: updates.logo_url ?? config.logo_url,
-        theme: updates.theme ?? config.theme,
-        lakera_enabled: lakeraEnabled,
-        lakera_blocking_mode: updates.lakera_blocking_mode ?? config.lakera_blocking_mode,
-        rag_content_scanning: ragContentScanning,
-        rag_lakera_project_id: updates.rag_lakera_project_id ?? config.rag_lakera_project_id,
-        openai_model: updates.openai_model ?? config.openai_model,
-        temperature: updates.temperature ?? config.temperature,
-        system_prompt: updates.system_prompt ?? config.system_prompt,
-        openai_api_key: updates.openai_api_key ?? config.openai_api_key,
-        litellm_virtual_key: updates.litellm_virtual_key ?? config.litellm_virtual_key,
-        litellm_guardrail_name: updates.litellm_guardrail_name ?? config.litellm_guardrail_name,
-        litellm_guardrail_monitor_name:
-          updates.litellm_guardrail_monitor_name ?? config.litellm_guardrail_monitor_name,
-        lakera_api_key: updates.lakera_api_key,
-        lakera_project_id: updates.lakera_project_id,
-        use_litellm: updates.use_litellm ?? config.use_litellm,
-        litellm_base_url: updates.litellm_base_url ?? config.litellm_base_url,
-        llm_provider: updates.llm_provider ?? config.llm_provider,
-        anthropic_api_key: updates.anthropic_api_key ?? config.anthropic_api_key,
-        google_api_key: updates.google_api_key ?? config.google_api_key,
-        mistral_api_key: updates.mistral_api_key ?? config.mistral_api_key,
-        groq_api_key: updates.groq_api_key ?? config.groq_api_key,
-        together_api_key: updates.together_api_key ?? config.together_api_key,
-        ollama_base_url: updates.ollama_base_url ?? config.ollama_base_url,
-        guardrail_provider: updates.guardrail_provider ?? config.guardrail_provider,
-        bedrock_guardrail_id: updates.bedrock_guardrail_id ?? config.bedrock_guardrail_id,
-        bedrock_guardrail_version: updates.bedrock_guardrail_version ?? config.bedrock_guardrail_version,
-        bedrock_region: updates.bedrock_region ?? config.bedrock_region,
-        bedrock_access_key_id: updates.bedrock_access_key_id ?? config.bedrock_access_key_id,
-        bedrock_secret_access_key: updates.bedrock_secret_access_key ?? config.bedrock_secret_access_key,
-        azure_content_safety_endpoint: updates.azure_content_safety_endpoint ?? config.azure_content_safety_endpoint,
-        azure_content_safety_key: updates.azure_content_safety_key ?? config.azure_content_safety_key,
-        palo_alto_api_key: updates.palo_alto_api_key ?? config.palo_alto_api_key,
-        palo_alto_profile_name: updates.palo_alto_profile_name ?? config.palo_alto_profile_name,
-        palo_alto_host: updates.palo_alto_host ?? config.palo_alto_host,
-        portkey_api_key: updates.portkey_api_key ?? config.portkey_api_key,
-        portkey_virtual_key: updates.portkey_virtual_key ?? config.portkey_virtual_key,
-      };
-
-      await apiService.updateConfig(updatedConfig);
+      await apiService.updateConfig(payload);
       await loadConfig();
       await loadModels();
       setMessage({ type: 'success', text: 'Configuration updated successfully' });
-    } catch (error) {
+    } catch (error: any) {
       console.error('Failed to update config:', error);
-      setMessage({ type: 'error', text: 'Failed to update configuration' });
+      // Try to surface 403 (locked) and 400 (validation) details from backend
+      const detail = error?.message || error?.detail || 'Failed to update configuration';
+      setMessage({ type: 'error', text: String(detail) });
     }
   };
 
