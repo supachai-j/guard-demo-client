@@ -414,6 +414,13 @@ class ApiService {
     });
   }
 
+  async runPlaybookMatrix(playbook_ids: string[], provider_ids: string[]): Promise<any> {
+    return this.request('/playbook-runs/matrix', {
+      method: 'POST',
+      body: JSON.stringify({ playbook_ids, provider_ids }),
+    });
+  }
+
   async deletePlaybookRun(id: number): Promise<{ deleted: number; id: number }> {
     return this.request(`/playbook-runs/${id}`, { method: 'DELETE' });
   }

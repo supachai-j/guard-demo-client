@@ -213,7 +213,7 @@ const ComparePanel: React.FC = () => {
   // Playbook-mode state
   const [playbooks, setPlaybooks] = useState<{ id: string; name: string; count: number }[]>([]);
   const [providers, setProviders] = useState<Array<{ id: string; display_name: string; configured: boolean }>>([]);
-  const [selectedPlaybook, setSelectedPlaybook] = useState<string>('');
+  const [selectedPlaybooks, setSelectedPlaybooks] = useState<Set<string>>(new Set());
   const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
   const [pbResult, setPbResult] = useState<any | null>(null);
   const [pbError, setPbError] = useState<string | null>(null);
@@ -234,16 +234,23 @@ const ComparePanel: React.FC = () => {
   };
 
   const runPlaybook = async () => {
-    if (!selectedPlaybook || selectedProviders.size === 0) return;
+    if (selectedPlaybooks.size === 0 || selectedProviders.size === 0) return;
     setLoading(true);
     setPbError(null);
     setPbResult(null);
     try {
-      const data = await apiService.runPlaybookMultiProvider(selectedPlaybook, Array.from(selectedProviders));
+      const data = await apiService.runPlaybookMatrix(
+        Array.from(selectedPlaybooks),
+        Array.from(selectedProviders),
+      );
       setPbResult(data);
-      if (data.errors?.length) {
-        setPbError(data.errors.map((e: any) => `${e.provider}: ${e.error}`).join('; '));
+      // Collect inner errors across all playbooks
+      const allErrors: string[] = [];
+      for (const pb of (data.playbooks || [])) {
+        if (pb.error) allErrors.push(`${pb.playbook_id}: ${pb.error}`);
+        for (const e of (pb.errors || [])) allErrors.push(`${pb.playbook_id}/${e.provider}: ${e.error}`);
       }
+      if (allErrors.length) setPbError(allErrors.join('; '));
     } catch (e: any) {
       setPbError(String(e?.message || e));
     } finally {
@@ -251,6 +258,13 @@ const ComparePanel: React.FC = () => {
     }
   };
 
+  const togglePlaybook = (id: string) => {
+    setSelectedPlaybooks(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   const toggleProvider = (id: string) => {
     setSelectedProviders(prev => {
       const next = new Set(prev);
@@ -288,15 +302,18 @@ const ComparePanel: React.FC = () => {
         {mode === 'playbook' && (
           <div className="space-y-3">
             <div>
-              <label className="block text-sm font-medium mb-1 dark:text-slate-200">Playbook</label>
-              <select value={selectedPlaybook} onChange={e => setSelectedPlaybook(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 dark:border-slate-600 rounded bg-white dark:bg-slate-900 dark:text-slate-100">
-                <option value="">— select a playbook —</option>
-                {playbooks.map(p => <option key={p.id} value={p.id}>{p.name} ({p.count} prompts)</option>)}
-              </select>
+              <label className="block text-sm font-medium mb-1 dark:text-slate-200">Playbooks (1-10)</label>
+              <div className="flex flex-wrap gap-2">
+                {playbooks.map(p => (
+                  <label key={p.id} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-sm cursor-pointer ${selectedPlaybooks.has(p.id) ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:text-primary-200' : 'border-gray-300 dark:border-slate-600 dark:text-slate-300'}`}>
+                    <input type="checkbox" checked={selectedPlaybooks.has(p.id)} onChange={() => togglePlaybook(p.id)} />
+                    {p.name} <span className="text-xs text-gray-500">({p.count})</span>
+                  </label>
+                ))}
+              </div>
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1 dark:text-slate-200">Providers to compare (2-6)</label>
+              <label className="block text-sm font-medium mb-1 dark:text-slate-200">Providers (1-6)</label>
               <div className="flex flex-wrap gap-2">
                 {providers.map(p => (
                   <label key={p.id} className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-sm cursor-pointer ${selectedProviders.has(p.id) ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/30 dark:text-primary-200' : 'border-gray-300 dark:border-slate-600 dark:text-slate-300'} ${p.configured === false ? 'opacity-50' : ''}`}>
@@ -309,78 +326,111 @@ const ComparePanel: React.FC = () => {
             </div>
             <div className="flex justify-between items-center">
               <span className="text-xs text-gray-500 dark:text-slate-400">
-                Each provider runs in turn; results saved to Run History.
-                {selectedPlaybook && selectedProviders.size > 0 && (
-                  <> Est: {(playbooks.find(p => p.id === selectedPlaybook)?.count || 0) * selectedProviders.size} API calls.</>
-                )}
+                Results saved to Run History.
+                {selectedPlaybooks.size > 0 && selectedProviders.size > 0 && (() => {
+                  const promptCount = Array.from(selectedPlaybooks).reduce((acc, id) => acc + (playbooks.find(p => p.id === id)?.count || 0), 0);
+                  return <> Matrix: {selectedPlaybooks.size}×{selectedProviders.size} = {selectedPlaybooks.size * selectedProviders.size} runs · ~{promptCount * selectedProviders.size} API calls.</>;
+                })()}
               </span>
-              <button onClick={runPlaybook} disabled={loading || !selectedPlaybook || selectedProviders.size === 0}
+              <button onClick={runPlaybook} disabled={loading || selectedPlaybooks.size === 0 || selectedProviders.size === 0}
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
-                <Play className="w-4 h-4" /> {loading ? `Running ${selectedProviders.size} providers…` : `Run on ${selectedProviders.size || 0} providers`}
+                <Play className="w-4 h-4" /> {loading ? `Running ${selectedPlaybooks.size}×${selectedProviders.size}…` : `Run ${selectedPlaybooks.size || 0}×${selectedProviders.size || 0} matrix`}
               </button>
             </div>
             {pbError && <div className="text-sm text-red-600 dark:text-red-400">⚠ {pbError}</div>}
-            {pbResult && (
-              <div className="mt-3 border-t pt-3 dark:border-slate-700">
-                <div className="text-sm font-medium mb-2 dark:text-slate-200">Results — {pbResult.playbook_name}</div>
-                {/* Aggregate per provider */}
-                <table className="w-full text-sm border border-gray-200 dark:border-slate-700 mb-3">
-                  <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300">
-                    <tr>
-                      <th className="text-left p-2">Provider</th>
-                      <th className="text-right p-2">Detection</th>
-                      <th className="text-right p-2">Pass rate</th>
-                      <th className="text-left p-2">Run #</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pbResult.runs.map((r: any) => (
-                      <tr key={r.id} className="border-t border-gray-100 dark:border-slate-700">
-                        <td className="p-2 dark:text-slate-200 font-medium">{r.guardrail_display_name}</td>
-                        <td className="p-2 text-right">{r.detection_rate}% <span className="text-xs text-gray-500">({r.detected}/{r.total})</span></td>
-                        <td className="p-2 text-right">{r.pass_rate}%</td>
-                        <td className="p-2 text-xs font-mono text-gray-500">#{r.id}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {/* Per-prompt matrix */}
-                <details>
-                  <summary className="text-sm cursor-pointer dark:text-slate-300 hover:text-primary-600">Per-prompt matrix ({pbResult.prompts.length} prompts)</summary>
-                  <table className="w-full text-xs border border-gray-200 dark:border-slate-700 mt-2">
-                    <thead>
-                      <tr className="bg-gray-50 dark:bg-slate-800 text-left">
-                        <th className="py-1 px-2 border-r dark:border-slate-700 w-16">ID</th>
-                        <th className="py-1 px-2 border-r dark:border-slate-700">Category</th>
-                        <th className="py-1 px-2 border-r dark:border-slate-700">Prompt</th>
-                        {pbResult.runs.map((r: any) => <th key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-center w-24">{r.guardrail_display_name?.split(' ')[0] || `#${r.id}`}</th>)}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pbResult.prompts.map((p: any) => {
-                        const verdicts = pbResult.runs.map((r: any) => p.by_run?.[String(r.id)]?.passed);
-                        const allPassed = verdicts.every((v: any) => v === true);
-                        const allFailed = verdicts.every((v: any) => v === false);
-                        const rowBg = allPassed ? 'bg-green-50 dark:bg-green-900/20'
-                          : allFailed ? 'bg-red-50 dark:bg-red-900/20'
-                          : 'bg-yellow-50 dark:bg-yellow-900/20';
-                        return (
-                          <tr key={p.id} className={`${rowBg} border-b border-gray-100 dark:border-slate-800`}>
-                            <td className="py-1 px-2 border-r dark:border-slate-700 font-mono">{p.id}</td>
-                            <td className="py-1 px-2 border-r dark:border-slate-700">{p.category}</td>
-                            <td className="py-1 px-2 border-r dark:border-slate-700 max-w-md truncate" title={p.prompt}>{p.prompt}</td>
-                            {pbResult.runs.map((r: any) => {
-                              const cell = p.by_run?.[String(r.id)];
-                              if (!cell) return <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-center text-gray-400">—</td>;
-                              const ok = cell.passed;
-                              return <td key={r.id} className={`py-1 px-2 border-r dark:border-slate-700 text-center font-semibold ${ok ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>{ok ? 'PASS' : 'FAIL'}</td>;
-                            })}
+            {pbResult && pbResult.playbooks && (
+              <div className="mt-3 border-t pt-3 dark:border-slate-700 space-y-4">
+                {/* Matrix grid: rows = playbook, cols = provider, cells = detection rate */}
+                {(() => {
+                  // Collect unique providers across all playbooks (preserve order)
+                  const provSeen = new Set<string>();
+                  const provCols: { id: string; display_name: string }[] = [];
+                  for (const pb of pbResult.playbooks) {
+                    for (const r of (pb.runs || [])) {
+                      if (!provSeen.has(r.guardrail_provider)) {
+                        provSeen.add(r.guardrail_provider);
+                        provCols.push({ id: r.guardrail_provider, display_name: r.guardrail_display_name || r.guardrail_provider });
+                      }
+                    }
+                  }
+                  return (
+                    <div>
+                      <div className="text-sm font-medium mb-2 dark:text-slate-200">Detection rate matrix</div>
+                      <table className="w-full text-sm border border-gray-200 dark:border-slate-700">
+                        <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300">
+                          <tr>
+                            <th className="text-left p-2 border-r dark:border-slate-700">Playbook</th>
+                            {provCols.map(c => <th key={c.id} className="p-2 border-r dark:border-slate-700 text-right">{c.display_name}</th>)}
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </details>
+                        </thead>
+                        <tbody>
+                          {pbResult.playbooks.map((pb: any) => (
+                            <tr key={pb.playbook_id} className="border-t border-gray-100 dark:border-slate-700">
+                              <td className="p-2 border-r dark:border-slate-700 dark:text-slate-200 font-medium">{pb.playbook_name || pb.playbook_id}</td>
+                              {provCols.map(c => {
+                                const run = (pb.runs || []).find((r: any) => r.guardrail_provider === c.id);
+                                if (!run) return <td key={c.id} className="p-2 border-r dark:border-slate-700 text-right text-gray-400">—</td>;
+                                // Color cell by detection rate band
+                                const rate = run.detection_rate;
+                                const bg = rate >= 90 ? 'bg-green-50 dark:bg-green-900/20'
+                                  : rate >= 50 ? 'bg-yellow-50 dark:bg-yellow-900/20'
+                                  : 'bg-red-50 dark:bg-red-900/20';
+                                return (
+                                  <td key={c.id} className={`p-2 border-r dark:border-slate-700 text-right ${bg}`}>
+                                    <span className="font-semibold">{rate}%</span>
+                                    <span className="text-xs text-gray-500 ml-1">({run.detected}/{run.total})</span>
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+
+                {/* Per-playbook collapsible detail */}
+                {pbResult.playbooks.map((pb: any) => (
+                  <details key={pb.playbook_id}>
+                    <summary className="text-sm cursor-pointer dark:text-slate-300 hover:text-primary-600">
+                      {pb.playbook_name} — per-prompt matrix ({(pb.prompts || []).length} prompts)
+                    </summary>
+                    <table className="w-full text-xs border border-gray-200 dark:border-slate-700 mt-2">
+                      <thead>
+                        <tr className="bg-gray-50 dark:bg-slate-800 text-left">
+                          <th className="py-1 px-2 border-r dark:border-slate-700 w-16">ID</th>
+                          <th className="py-1 px-2 border-r dark:border-slate-700">Category</th>
+                          <th className="py-1 px-2 border-r dark:border-slate-700">Prompt</th>
+                          {(pb.runs || []).map((r: any) => <th key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-center w-24">{r.guardrail_display_name?.split(' ')[0] || `#${r.id}`}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(pb.prompts || []).map((p: any) => {
+                          const verdicts = (pb.runs || []).map((r: any) => p.by_run?.[String(r.id)]?.passed);
+                          const allPassed = verdicts.length > 0 && verdicts.every((v: any) => v === true);
+                          const allFailed = verdicts.length > 0 && verdicts.every((v: any) => v === false);
+                          const rowBg = allPassed ? 'bg-green-50 dark:bg-green-900/20'
+                            : allFailed ? 'bg-red-50 dark:bg-red-900/20'
+                            : 'bg-yellow-50 dark:bg-yellow-900/20';
+                          return (
+                            <tr key={p.id} className={`${rowBg} border-b border-gray-100 dark:border-slate-800`}>
+                              <td className="py-1 px-2 border-r dark:border-slate-700 font-mono">{p.id}</td>
+                              <td className="py-1 px-2 border-r dark:border-slate-700">{p.category}</td>
+                              <td className="py-1 px-2 border-r dark:border-slate-700 max-w-md truncate" title={p.prompt}>{p.prompt}</td>
+                              {(pb.runs || []).map((r: any) => {
+                                const cell = p.by_run?.[String(r.id)];
+                                if (!cell) return <td key={r.id} className="py-1 px-2 border-r dark:border-slate-700 text-center text-gray-400">—</td>;
+                                const ok = cell.passed;
+                                return <td key={r.id} className={`py-1 px-2 border-r dark:border-slate-700 text-center font-semibold ${ok ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'}`}>{ok ? 'PASS' : 'FAIL'}</td>;
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </details>
+                ))}
               </div>
             )}
           </div>

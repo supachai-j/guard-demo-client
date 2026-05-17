@@ -59,6 +59,11 @@ class MultiProviderRunRequest(BaseModel):
     provider_ids: List[str]
 
 
+class MatrixRunRequest(BaseModel):
+    playbook_ids: List[str]
+    provider_ids: List[str]
+
+
 @router.post("/multi-provider", dependencies=[Depends(_auth.require_admin)])
 async def run_multi_provider(payload: MultiProviderRunRequest, db: Session = Depends(get_db)):
     """Fan a playbook across N selected guardrail providers in one call.
@@ -201,6 +206,134 @@ async def run_multi_provider(payload: MultiProviderRunRequest, db: Session = Dep
         "prompts": list(prompts_index.values()),
         "errors": errors,
     }
+
+
+async def _run_playbook_against_providers(
+    playbook_id: str, provider_ids: List[str], db: Session
+) -> dict:
+    """Shared helper: run one playbook against N providers, return same shape
+    as /multi-provider. Used by /multi-provider and /matrix endpoints."""
+    from ..guardrail_provider import GUARDRAIL_PROVIDERS
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+
+    pb_dict = None
+    if _builtin_playbooks.is_builtin(playbook_id):
+        pb_dict = _builtin_playbooks.get_playbook(playbook_id)
+    else:
+        row = db.query(Playbook).filter(Playbook.slug == playbook_id).first()
+        if row:
+            pb_dict = {
+                "id": row.slug,
+                "name": row.name,
+                "description": row.description,
+                "prompts": row.prompts or [],
+            }
+    if not pb_dict:
+        return {"playbook_id": playbook_id, "error": f"playbook '{playbook_id}' not found", "runs": [], "prompts": []}
+
+    def _verdict(flagged: bool, expected: Optional[str]) -> bool:
+        if expected == "allowed":
+            return not flagged
+        return flagged
+
+    async def _scan_one(provider, item):
+        try:
+            status = await provider.check_interaction(
+                messages=[{"role": "user", "content": item["prompt"]}],
+                cfg=config,
+                meta=None,
+                system_prompt=config.system_prompt,
+            )
+            flagged = bool(status and status.get("flagged"))
+            return {
+                "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
+                "expected": item.get("expected"), "flagged": flagged,
+                "passed": _verdict(flagged, item.get("expected")),
+                "breakdown": (status or {}).get("breakdown") or [],
+            }
+        except Exception as e:
+            return {
+                "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
+                "expected": item.get("expected"), "flagged": False, "passed": False, "error": str(e),
+            }
+
+    created_rows: List[PlaybookRun] = []
+    errors: List[dict] = []
+    for pid in provider_ids:
+        provider = GUARDRAIL_PROVIDERS.get(pid)
+        if not provider:
+            errors.append({"provider": pid, "error": f"unknown provider '{pid}'"})
+            continue
+        if not provider.is_configured(config):
+            errors.append({"provider": pid, "error": f"provider '{pid}' not configured"})
+            continue
+        results = await asyncio.gather(*[_scan_one(provider, p) for p in pb_dict["prompts"]])
+        detected = sum(1 for r in results if r.get("flagged"))
+        passed = sum(1 for r in results if r.get("passed"))
+        total = len(results)
+        row = PlaybookRun(
+            playbook_slug=playbook_id,
+            playbook_name=pb_dict["name"],
+            guardrail_provider=pid,
+            guardrail_display_name=provider.display_name,
+            llm_provider=getattr(config, "llm_provider", None),
+            total=total, detected=detected,
+            detection_rate=round(100.0 * detected / total, 1) if total else 0.0,
+            pass_rate=round(100.0 * passed / total, 1) if total else 0.0,
+            raw_results=results,
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
+        created_rows.append(row)
+
+    # Per-prompt matrix for this playbook
+    prompts_index: dict = {}
+    for run in created_rows:
+        for r in (run.raw_results or []):
+            pid_key = r.get("id")
+            if pid_key is None:
+                continue
+            if pid_key not in prompts_index:
+                prompts_index[pid_key] = {
+                    "id": pid_key, "category": r.get("category"),
+                    "prompt": r.get("prompt"), "expected": r.get("expected"),
+                    "by_run": {},
+                }
+            prompts_index[pid_key]["by_run"][str(run.id)] = {
+                "flagged": r.get("flagged"), "passed": r.get("passed"), "error": r.get("error"),
+            }
+
+    return {
+        "playbook_id": playbook_id,
+        "playbook_name": pb_dict["name"],
+        "runs": [_summary(r) for r in created_rows],
+        "prompts": list(prompts_index.values()),
+        "errors": errors,
+    }
+
+
+@router.post("/matrix", dependencies=[Depends(_auth.require_admin)])
+async def run_matrix(payload: MatrixRunRequest, db: Session = Depends(get_db)):
+    """Fan M playbooks × N providers — creates one PlaybookRun row per
+    (playbook, provider) cell. Returns `{playbooks: [...]}` where each
+    element is the same shape as /multi-provider response."""
+    if not payload.playbook_ids:
+        raise HTTPException(status_code=400, detail="playbook_ids must be non-empty")
+    if not payload.provider_ids:
+        raise HTTPException(status_code=400, detail="provider_ids must be non-empty")
+    if len(payload.playbook_ids) > 10:
+        raise HTTPException(status_code=400, detail="max 10 playbooks per matrix")
+    if len(payload.provider_ids) > 6:
+        raise HTTPException(status_code=400, detail="max 6 providers per matrix")
+
+    out = []
+    for pb_id in payload.playbook_ids:
+        out.append(await _run_playbook_against_providers(pb_id, payload.provider_ids, db))
+    return {"playbooks": out}
 
 
 @router.get("/compare", dependencies=[Depends(_auth.require_admin)])
