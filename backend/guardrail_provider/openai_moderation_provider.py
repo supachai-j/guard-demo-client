@@ -14,7 +14,7 @@ from typing import Any, Dict, List, Optional
 from openai import OpenAI
 
 from .. import lakera as legacy_lakera
-from .base import GuardrailProvider, GuardrailStatus
+from .base import GuardrailProvider, GuardrailStatus, classify_http, make_error_status
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,35 @@ _CATEGORY_MAP = {
     "illicit": "moderated_content/crime",
     "illicit/violent": "moderated_content/weapons",
 }
+
+
+def _classify_openai_exception(e: Exception) -> str:
+    """Map an `openai` SDK exception (or any exception) to a base error class.
+
+    Imports are lazy so we never crash on a missing/older SDK; we just fall
+    through to the HTTP-status fallback or transport_error.
+    """
+    try:
+        import openai as _openai
+        if isinstance(e, getattr(_openai, "AuthenticationError", ())):
+            return "auth_failed"
+        if isinstance(e, getattr(_openai, "PermissionDeniedError", ())):
+            return "auth_failed"
+        if isinstance(e, getattr(_openai, "RateLimitError", ())):
+            return "rate_limited"
+        if isinstance(e, getattr(_openai, "APIConnectionError", ())):
+            return "transport_error"
+        if isinstance(e, getattr(_openai, "APITimeoutError", ())):
+            return "transport_error"
+        if isinstance(e, getattr(_openai, "APIStatusError", ())):
+            sc = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+            return classify_http(sc) if isinstance(sc, int) else "http_error"
+    except Exception:
+        pass
+    sc = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+    if isinstance(sc, int):
+        return classify_http(sc)
+    return "transport_error"
 
 
 def _last_user_text(messages: List[Dict[str, str]]) -> str:
@@ -118,14 +147,16 @@ class OpenAIModerationProvider(GuardrailProvider):
                 input=text,
             )
         except Exception as e:  # noqa: BLE001 — vendor SDK throws many shapes
-            logger.warning("OpenAI Moderation error: %s", e)
-            return None
+            error_class = _classify_openai_exception(e)
+            http_status = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+            logger.warning("OpenAI Moderation error (%s): %s", error_class, e)
+            return make_error_status(self.id, error_class, http_status=http_status, detail=str(e))
 
         # The OpenAI SDK returns a Pydantic-ish object; .results[0].categories
         # is a dict-like with bool flags.
         result_obj = (resp.results or [None])[0]
         if result_obj is None:
-            return None
+            return make_error_status(self.id, "parse_error", detail="empty results array")
 
         try:
             categories = result_obj.categories.model_dump()  # type: ignore[attr-defined]
@@ -165,12 +196,14 @@ class OpenAIModerationProvider(GuardrailProvider):
                 input=[{"type": "image_url", "image_url": {"url": image_data_url}}],
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("OpenAI Moderation image check error: %s", e)
-            return None
+            error_class = _classify_openai_exception(e)
+            http_status = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+            logger.warning("OpenAI Moderation image check error (%s): %s", error_class, e)
+            return make_error_status(self.id, error_class, http_status=http_status, detail=str(e))
 
         result_obj = (resp.results or [None])[0]
         if result_obj is None:
-            return None
+            return make_error_status(self.id, "parse_error", detail="empty results array")
         try:
             categories = result_obj.categories.model_dump()  # type: ignore[attr-defined]
         except AttributeError:

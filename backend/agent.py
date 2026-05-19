@@ -393,7 +393,16 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
         lakera_status = e.lakera_status if isinstance(e.lakera_status, dict) else None
         if lakera_status:
             lakera.set_last_result(lakera_status)
-        blocked_text = "This content has been moderated by Lakera and found to be in breach of our security policies. Please contact support if you believe this is an error."
+        # Surface the active provider's display name in the user-facing block
+        # message rather than hardcoding "Lakera" — the chat may be running
+        # behind Bedrock, Azure, Prisma AIRS, Cloudflare, etc.
+        _provider_label = (
+            active_guardrail.display_name if active_guardrail else "the active guardrail"
+        )
+        blocked_text = (
+            f"This content has been moderated by {_provider_label} and found to be in "
+            "breach of our security policies. Please contact support if you believe this is an error."
+        )
         if persist and conv is not None:
             try:
                 audit.record_chat_turn(

@@ -12,7 +12,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from .. import lakera as legacy_lakera
-from .base import GuardrailProvider, GuardrailStatus
+from .base import GuardrailProvider, GuardrailStatus, classify_http, make_error_status
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +41,48 @@ _PII_MAP = {
     "DRIVER_ID": "pii/driver_id",
     "PASSPORT_NUMBER": "pii/passport_number",
 }
+
+
+def _classify_botocore_exception(e: Exception) -> tuple:
+    """Map a botocore exception to (error_class, http_status_or_None).
+
+    AccessDenied / UnrecognizedClient / InvalidSignatureException → auth_failed
+    ThrottlingException / TooManyRequestsException                → rate_limited
+    ServiceUnavailableException / InternalServerException         → upstream_outage
+    EndpointConnectionError / ConnectTimeoutError / ReadTimeout   → transport_error
+    """
+    try:
+        from botocore.exceptions import ClientError, EndpointConnectionError  # type: ignore
+        from botocore.exceptions import ConnectionError as BotoConnError
+    except Exception:
+        return "transport_error", None
+
+    if isinstance(e, EndpointConnectionError) or isinstance(e, BotoConnError):
+        return "transport_error", None
+    if isinstance(e, ClientError):
+        resp = getattr(e, "response", None) or {}
+        code = ((resp.get("Error") or {}).get("Code")) or ""
+        http_status = ((resp.get("ResponseMetadata") or {}).get("HTTPStatusCode"))
+        auth_codes = {
+            "AccessDeniedException", "UnrecognizedClientException", "InvalidSignatureException",
+            "MissingAuthenticationTokenException", "ExpiredTokenException",
+            "ResourceNotFoundException",  # bedrock returns this for unknown guardrail-id under wrong account
+        }
+        rate_codes = {"ThrottlingException", "TooManyRequestsException", "RequestLimitExceeded"}
+        outage_codes = {"ServiceUnavailableException", "InternalServerException", "InternalServerError"}
+        if code in auth_codes:
+            return "auth_failed", http_status
+        if code in rate_codes:
+            return "rate_limited", http_status
+        if code in outage_codes:
+            return "upstream_outage", http_status
+        if isinstance(http_status, int):
+            return classify_http(http_status), http_status
+    # Timeout-ish names that don't subclass cleanly
+    name = type(e).__name__
+    if "Timeout" in name or "ConnectError" in name:
+        return "transport_error", None
+    return "http_error", None
 
 
 def _bedrock_client(cfg: Any):
@@ -178,7 +220,7 @@ class BedrockGuardrailsProvider(GuardrailProvider):
 
         client = _bedrock_client(cfg)
         if not client:
-            return None
+            return make_error_status(self.id, "config_error", detail="boto3 unavailable or client build failed")
 
         # Decide INPUT vs OUTPUT — if the last message is from the assistant
         # this is a post-response check.
@@ -192,8 +234,9 @@ class BedrockGuardrailsProvider(GuardrailProvider):
                 content=content,
             )
         except Exception as e:  # noqa: BLE001
-            logger.warning("Bedrock ApplyGuardrail error: %s", e)
-            return None
+            error_class, http_status = _classify_botocore_exception(e)
+            logger.warning("Bedrock ApplyGuardrail error (%s): %s", error_class, e)
+            return make_error_status(self.id, error_class, http_status=http_status, detail=str(e))
 
         action = (resp.get("action") or "").upper()
         flagged = action in {"GUARDRAIL_INTERVENED"}

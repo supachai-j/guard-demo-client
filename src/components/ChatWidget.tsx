@@ -3,6 +3,7 @@ import { Send, Bot, User, Loader2, MessageCircle, Minimize2 } from 'lucide-react
 import { ChatMessage, LakeraResult, AppConfig, DemoPromptSuggestion } from '../types';
 import { apiService } from '../services/api';
 import { useUI } from '../i18n/UIContext';
+import { guardrailShortLabel } from '../i18n/guardrailLabel';
 
 interface ChatWidgetProps {
   onLakeraToggle?: (enabled: boolean) => void;
@@ -255,12 +256,12 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
                       : 'bg-primary-700 hover:bg-primary-800'
                   }`}
                 >
-                  {config?.lakera_enabled && config?.lakera_blocking_mode 
-                    ? 'Lakera Blocking' 
-                    : config?.lakera_enabled 
-                      ? 'Lakera Watching' 
-                      : 'Lakera'
-                  }
+                  {(() => {
+                    const label = guardrailShortLabel(config?.guardrail_provider);
+                    if (config?.lakera_enabled && config?.lakera_blocking_mode) return `${label} Blocking`;
+                    if (config?.lakera_enabled) return `${label} Watching`;
+                    return label;
+                  })()}
                 </button>
                 <button
                   onClick={() => setIsExpanded(false)}

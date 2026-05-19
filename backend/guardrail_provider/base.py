@@ -4,6 +4,14 @@ The unified result dict mirrors the Lakera /v2/guard response shape so the
 existing frontend overlay (LakeraOverlay, CompareDialog) works for every
 provider without changes. Adapters are responsible for normalising their
 vendor response into this shape.
+
+Failure handling — providers should NOT silently return None on HTTP /
+transport errors; that collapses auth / rate-limit / outage / parse into one
+indistinguishable null and forces the operator to guess. Use
+`make_error_status` to return a structured empty status whose
+`metadata.error` carries the classified cause; the playbook runner reads it
+to produce an actionable histogram (e.g. "20 auth_failed (HTTP 403)" instead
+of "20 null"). `flagged` stays False so chat-flow semantics are unchanged.
 """
 
 from abc import ABC, abstractmethod
@@ -26,6 +34,52 @@ class GuardrailStatus(TypedDict, total=False):
     breakdown: List[GuardrailDetectorResult]
     payload: List[Any]
     metadata: Dict[str, Any]
+
+
+#: Stable set of error classes the playbook UI knows how to render.
+#: Add new ones here when a provider needs a new bucket — keeping the list
+#: small means the operator-facing histogram stays scannable.
+ERROR_CLASSES = (
+    "auth_failed",       # 401/403, bad/expired key, missing permission
+    "rate_limited",      # 429, throttled
+    "upstream_outage",   # 5xx, vendor degraded
+    "transport_error",   # DNS, TCP, TLS, timeout — never reached vendor
+    "parse_error",       # 2xx body unparseable
+    "config_error",      # client built but mandatory field missing at call time
+    "http_error",        # any other non-2xx
+)
+
+
+def classify_http(status_code: int) -> str:
+    """Map an HTTP status code to one of ERROR_CLASSES."""
+    if status_code in (401, 403):
+        return "auth_failed"
+    if status_code == 429:
+        return "rate_limited"
+    if 500 <= status_code < 600:
+        return "upstream_outage"
+    return "http_error"
+
+
+def make_error_status(
+    source: str,
+    error_class: str,
+    http_status: Optional[int] = None,
+    detail: Optional[str] = None,
+) -> GuardrailStatus:
+    """Return an empty guardrail status tagged with a classified failure.
+
+    `source` is the provider id (e.g. "palo_alto_airs"); `error_class` is one
+    of ERROR_CLASSES. `flagged` stays False so chat-flow lets the turn
+    through — preserving today's fail-open posture — but the playbook runner
+    surfaces the classification to the operator.
+    """
+    meta: Dict[str, Any] = {"source": source, "error": error_class}
+    if http_status is not None:
+        meta["http_status"] = http_status
+    if detail:
+        meta["error_detail"] = str(detail)[:200]
+    return {"flagged": False, "breakdown": [], "payload": [], "metadata": meta}
 
 
 class GuardrailProvider(ABC):

@@ -23,7 +23,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from .. import lakera as legacy_lakera
-from .base import GuardrailProvider, GuardrailStatus
+from .base import GuardrailProvider, GuardrailStatus, classify_http, make_error_status
 
 logger = logging.getLogger(__name__)
 
@@ -175,7 +175,7 @@ class AzureContentSafetyProvider(GuardrailProvider):
                 )
         except Exception as e:  # noqa: BLE001
             logger.warning("Azure Content Safety transport error: %s", e)
-            return None
+            return make_error_status(self.id, "transport_error", detail=str(e))
 
         analyze_resp, shield_resp = results
         breakdown: List[Dict[str, Any]] = []
@@ -188,6 +188,17 @@ class AzureContentSafetyProvider(GuardrailProvider):
         # we still want to count the partial outage as informational.
         shield_unavailable = False
         partial_failure: List[str] = []
+        # Capture the dominant error class so a total-failure (neither call
+        # produced usable data) can surface auth_failed / rate_limited /
+        # upstream_outage to the playbook UI instead of an opaque null.
+        dominant_error: Optional[str] = None
+        dominant_status: Optional[int] = None
+        def _record(err_class: str, http_status: Optional[int] = None) -> None:
+            nonlocal dominant_error, dominant_status
+            # First non-transport error wins; auth_failed beats anything else.
+            if dominant_error is None or err_class == "auth_failed":
+                dominant_error = err_class
+                dominant_status = http_status
 
         # text:analyze categories
         if isinstance(analyze_resp, httpx.Response):
@@ -201,6 +212,7 @@ class AzureContentSafetyProvider(GuardrailProvider):
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Azure text:analyze parse error: %s", e)
                     partial_failure.append(f"text:analyze parse error: {e}")
+                    _record("parse_error")
             else:
                 logger.warning(
                     "Azure text:analyze HTTP %s: %s",
@@ -208,9 +220,11 @@ class AzureContentSafetyProvider(GuardrailProvider):
                     analyze_resp.text[:200],
                 )
                 partial_failure.append(f"text:analyze HTTP {analyze_resp.status_code}")
+                _record(classify_http(analyze_resp.status_code), analyze_resp.status_code)
         elif isinstance(analyze_resp, Exception):
             logger.warning("Azure text:analyze failed: %s", analyze_resp)
             partial_failure.append(f"text:analyze transport error: {analyze_resp}")
+            _record("transport_error")
 
         # text:shieldPrompt — may not be available in older API versions; ignore on 404.
         if isinstance(shield_resp, httpx.Response):
@@ -222,6 +236,7 @@ class AzureContentSafetyProvider(GuardrailProvider):
                 except Exception as e:  # noqa: BLE001
                     logger.warning("Azure shieldPrompt parse error: %s", e)
                     partial_failure.append(f"shieldPrompt parse error: {e}")
+                    _record("parse_error")
             elif shield_resp.status_code == 404:
                 logger.info("Azure Prompt Shields not available in this region/api-version")
                 shield_unavailable = True  # not counted as a failure
@@ -232,16 +247,24 @@ class AzureContentSafetyProvider(GuardrailProvider):
                     shield_resp.text[:200],
                 )
                 partial_failure.append(f"shieldPrompt HTTP {shield_resp.status_code}")
+                _record(classify_http(shield_resp.status_code), shield_resp.status_code)
         elif isinstance(shield_resp, Exception):
             logger.warning("Azure shieldPrompt failed: %s", shield_resp)
             partial_failure.append(f"shieldPrompt transport error: {shield_resp}")
+            _record("transport_error")
 
-        # No usable data at all? Return None so the caller can distinguish
-        # "guardrail outage" from "prompt is clean". Without this, Azure was
-        # silently fail-open: a DNS or 401 failure produced `flagged=False`
-        # and the chat path would let an attack through.
+        # No usable data at all? Return a classified error-status so the
+        # playbook UI can surface auth_failed / rate_limited / outage instead
+        # of an opaque null. Without this, Azure was silently fail-open: a
+        # DNS or 401 failure produced `flagged=False` and the chat path would
+        # let an attack through.
         if not analyze_ok and not shield_ok and not shield_unavailable:
-            return None
+            return make_error_status(
+                self.id,
+                dominant_error or "http_error",
+                http_status=dominant_status,
+                detail="; ".join(partial_failure) if partial_failure else None,
+            )
 
         flagged = any(b.get("detected") for b in breakdown)
 
@@ -293,16 +316,17 @@ class AzureContentSafetyProvider(GuardrailProvider):
                 resp = await client.post(url, headers=headers, json=body)
         except Exception as e:  # noqa: BLE001
             logger.warning("Azure image:analyze transport error: %s", e)
-            return None
+            return make_error_status(self.id, "transport_error", detail=str(e))
 
         if resp.status_code >= 400:
-            logger.warning("Azure image:analyze HTTP %s: %s", resp.status_code, resp.text[:200])
-            return None
+            error_class = classify_http(resp.status_code)
+            logger.warning("Azure image:analyze HTTP %s (%s): %s", resp.status_code, error_class, resp.text[:200])
+            return make_error_status(self.id, error_class, http_status=resp.status_code, detail=resp.text)
 
         try:
             data = resp.json()
-        except Exception:
-            return None
+        except Exception as e:
+            return make_error_status(self.id, "parse_error", detail=str(e))
 
         breakdown = _format_categories(data.get("categoriesAnalysis") or [], message_id=0)
         flagged = any(b.get("detected") for b in breakdown)

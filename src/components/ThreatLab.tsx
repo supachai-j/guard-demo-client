@@ -1097,7 +1097,7 @@ const HistoryPanel: React.FC = () => {
       setLoading(false);
     }
   };
-  useEffect(() => { load(); }, [filterPlaybook, filterProvider]); // eslint-disable-line
+  useEffect(() => { load(); }, [filterPlaybook, filterProvider]);
 
   const toggle = (id: number) => {
     setSelected(prev => {

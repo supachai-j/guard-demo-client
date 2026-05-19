@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, Shield, AlertTriangle, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { apiService } from '../services/api';
-import { LakeraResult, DETECTOR_LABELS } from '../types';
+import { AppConfig, LakeraResult, DETECTOR_LABELS } from '../types';
 import { useUI } from '../i18n/UIContext';
+import { guardrailShortLabel } from '../i18n/guardrailLabel';
 
 interface LakeraOverlayProps {
   isOpen: boolean;
   onClose: () => void;
+  config?: AppConfig | null;
 }
 
 /** Map Lakera message_id to role when system prompt is first (0=system, 1=user, 2=assistant, 3=user, ...). */
@@ -22,8 +24,9 @@ function messageIdToLabel(messageId: number): string {
   return role.charAt(0).toUpperCase() + role.slice(1);
 }
 
-const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
+const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose, config }) => {
   const { t } = useUI();
+  const provider = guardrailShortLabel(config?.guardrail_provider);
   const [lakeraResult, setLakeraResult] = useState<LakeraResult | null>(null);
   const [isExpanded, setIsExpanded] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -112,7 +115,7 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
         <div className="bg-primary-600 text-white p-4 flex items-center justify-between">
           <div className="flex items-center space-x-2">
             <Shield className="w-5 h-5" />
-            <span className="font-semibold">{t('guardrailResults')}</span>
+            <span className="font-semibold">{t('guardrailResults', { provider })}</span>
           </div>
           <button
             onClick={onClose}
@@ -246,7 +249,7 @@ const LakeraOverlay: React.FC<LakeraOverlayProps> = ({ isOpen, onClose }) => {
               {lakeraResult && lakeraResult.flagged && (
                 <div className="bg-red-50 dark:bg-red-500/15 border border-red-200 dark:border-red-500/30 rounded-lg p-4">
                   <h3 className="font-medium text-red-800 dark:text-red-200 mb-2">{t('contentFlagged')}</h3>
-                  <p className="text-sm text-red-600 dark:text-red-300">{t('contentFlaggedBody')}</p>
+                  <p className="text-sm text-red-600 dark:text-red-300">{t('contentFlaggedBody', { provider })}</p>
                 </div>
               )}
             </div>

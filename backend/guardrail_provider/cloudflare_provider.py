@@ -22,7 +22,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from .base import GuardrailProvider, GuardrailStatus
+from .base import GuardrailProvider, GuardrailStatus, classify_http, make_error_status
 
 # MLCommons hazard taxonomy used by Llama Guard 3.
 _LLAMA_GUARD_CATEGORIES: Dict[str, str] = {
@@ -91,15 +91,19 @@ class CloudflareFirewallForAIProvider(GuardrailProvider):
         try:
             async with httpx.AsyncClient(timeout=15.0) as client:
                 resp = await client.post(url, headers=headers, json=payload)
-                resp.raise_for_status()
-                data = resp.json()
+                if resp.status_code >= 400:
+                    return make_error_status(
+                        self.id,
+                        classify_http(resp.status_code),
+                        http_status=resp.status_code,
+                        detail=resp.text,
+                    )
+                try:
+                    data = resp.json()
+                except Exception as e:
+                    return make_error_status(self.id, "parse_error", detail=str(e))
         except Exception as e:
-            return {
-                "flagged": False,
-                "breakdown": [],
-                "payload": [],
-                "metadata": {"source": "cloudflare_firewall_ai", "error": str(e)},
-            }
+            return make_error_status(self.id, "transport_error", detail=str(e))
 
         # Workers AI envelope: {"result": {"response": "safe"|"unsafe\nS1\nS3", ...}, "success": true}
         result_obj = data.get("result") if isinstance(data, dict) else None

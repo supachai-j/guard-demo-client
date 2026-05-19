@@ -18,13 +18,13 @@ export const EN = {
   getStarted: 'Get Started',
   learnMore: 'Learn More',
   compareCta: 'Compare with/without Guard',
-  compareCtaTooltip: 'Run the same prompt with and without Lakera Guard, side by side',
+  compareCtaTooltip: 'Run the same prompt with and without {provider}, side by side',
 
   // Hero features
   feat1Title: 'AI-Powered Security',
-  feat1Body: 'Advanced content moderation and guardrails powered by Lakera Guard.',
+  feat1Body: 'Advanced content moderation and guardrails — pluggable across Lakera, OpenAI, Bedrock, Azure, Prisma AIRS, and Cloudflare.',
   feat2Title: 'Secure RAG System',
-  feat2Body: 'AI-powered content for Lakera-protected intelligent responses.',
+  feat2Body: 'AI-powered content with guardrail-protected intelligent responses.',
   feat3Title: 'Tool Integration',
   feat3Body: 'Confidently integrate with external MCP tools and APIs via ToolHive.',
 
@@ -58,8 +58,8 @@ export const EN = {
   malicious: 'malicious',
   close: 'Close',
 
-  // Lakera overlay
-  guardrailResults: 'Lakera Guard Results',
+  // Guardrail overlay (provider name injected at render via {provider} token)
+  guardrailResults: '{provider} Results',
   noLakeraResult: 'No guardrail result available yet — send a chat message first.',
   flagged: 'Flagged',
   clean: 'Clean',
@@ -71,7 +71,7 @@ export const EN = {
   guardrailDetails: 'Guardrail Details',
   rawJson: 'Raw JSON',
   contentFlagged: 'Content Flagged',
-  contentFlaggedBody: 'This content has been flagged by Lakera Guard.',
+  contentFlaggedBody: 'This content has been flagged by {provider}.',
   requestId: 'Request ID',
   refresh: 'Refresh',
   detected: 'Detected',
@@ -103,13 +103,13 @@ export const TH: Dict = {
   getStarted: 'เริ่มใช้งาน',
   learnMore: 'เรียนรู้เพิ่มเติม',
   compareCta: 'เปรียบเทียบเปิด/ปิด Guard',
-  compareCtaTooltip: 'รัน prompt เดียวกันคู่กัน เปิด Lakera Guard กับ ปิด',
+  compareCtaTooltip: 'รัน prompt เดียวกันคู่กัน เปิด {provider} กับ ปิด',
 
   // Hero features
   feat1Title: 'ความปลอดภัยด้วย AI',
-  feat1Body: 'ตรวจสอบเนื้อหาและตั้ง guardrails ด้วย Lakera Guard',
+  feat1Body: 'ตรวจสอบเนื้อหาและตั้ง guardrails — ใช้ได้ทั้ง Lakera, OpenAI, Bedrock, Azure, Prisma AIRS, และ Cloudflare',
   feat2Title: 'ระบบ RAG ที่ปลอดภัย',
-  feat2Body: 'สร้างเนื้อหาด้วย AI ตอบคำถามอย่างชาญฉลาดและถูกคุ้มครองด้วย Lakera',
+  feat2Body: 'สร้างเนื้อหาด้วย AI ตอบคำถามอย่างชาญฉลาด คุ้มครองด้วย guardrails',
   feat3Title: 'เชื่อมต่อเครื่องมือ',
   feat3Body: 'เชื่อมต่อ MCP tools และ APIs ภายนอกผ่าน ToolHive ได้อย่างมั่นใจ',
 
@@ -143,8 +143,8 @@ export const TH: Dict = {
   malicious: 'อันตราย',
   close: 'ปิด',
 
-  // Lakera overlay
-  guardrailResults: 'ผลตรวจ Lakera Guard',
+  // Guardrail overlay (provider name injected at render via {provider} token)
+  guardrailResults: 'ผลตรวจ {provider}',
   noLakeraResult: 'ยังไม่มีผลตรวจ — ลองส่งข้อความใน chat ก่อน',
   flagged: 'พบความเสี่ยง',
   clean: 'ปลอดภัย',
@@ -156,7 +156,7 @@ export const TH: Dict = {
   guardrailDetails: 'รายละเอียด Guardrail',
   rawJson: 'JSON ดิบ',
   contentFlagged: 'เนื้อหาถูกตรวจพบ',
-  contentFlaggedBody: 'เนื้อหานี้ถูกตรวจพบโดย Lakera Guard',
+  contentFlaggedBody: 'เนื้อหานี้ถูกตรวจพบโดย {provider}',
   requestId: 'Request ID',
   refresh: 'รีเฟรช',
   detected: 'ตรวจพบ',

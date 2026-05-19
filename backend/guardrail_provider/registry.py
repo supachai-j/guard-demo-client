@@ -88,7 +88,7 @@ _PROVIDER_UI_FIELDS: Dict[str, Dict[str, Any]] = {
         "fields": [
             {"name": "palo_alto_api_key", "label": "AIRS API Token (x-pan-token)", "type": "password", "placeholder": "your AIRS API token"},
             {"name": "palo_alto_profile_name", "label": "AI Security Profile name", "type": "text", "placeholder": "e.g. default-ai-profile"},
-            {"name": "palo_alto_host", "label": "AIRS Host (region)", "type": "text", "placeholder": "service.api.aisecurity.paloaltonetworks.com"},
+            {"name": "palo_alto_host", "label": "AIRS Host (region)", "type": "text", "placeholder": "service-sg.api.aisecurity.paloaltonetworks.com"},
         ],
         "docs_url": "https://pan.dev/prisma-airs/api/airuntimesecurity/",
         "summary": "Calls POST /v1/scan/sync/request. Detects prompt injection, DLP, URL cats, toxic content, malicious code. Requires an AI security profile preconfigured in Strata Cloud Manager.",

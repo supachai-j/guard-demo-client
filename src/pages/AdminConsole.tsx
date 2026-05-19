@@ -10,7 +10,6 @@ import RagManagement, { RagManagementRef } from '../components/RagManagement';
 import DemoPromptManager from '../components/DemoPromptManager';
 import UIToggles from '../components/UIToggles';
 import ThreatLab from '../components/ThreatLab';
-import AttackFeed from '../components/AttackFeed';
 import { useUI } from '../i18n/UIContext';
 import { useAuth } from '../auth/AuthContext';
 import { LogOut } from 'lucide-react';
@@ -415,7 +414,6 @@ const AdminConsole: React.FC = () => {
 
   return (
     <div className="admin-page min-h-screen bg-gray-50 dark:bg-slate-900">
-      <AttackFeed />
       {/* Header */}
       <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-gray-200 dark:border-slate-700">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -1438,7 +1436,7 @@ const PROVIDER_FIELD_SCHEMAS: Record<string, ProviderFieldDef[]> = {
   palo_alto_airs: [
     { field: 'palo_alto_api_key', label: 'Prisma AIRS API Key', type: 'password', required: true },
     { field: 'palo_alto_profile_name', label: 'Profile Name', type: 'text', required: true, placeholder: 'test-profile' },
-    { field: 'palo_alto_host', label: 'Host URL', type: 'text', placeholder: 'https://service.api.aisecurity.paloaltonetworks.com', help: 'Optional — defaults to global endpoint' },
+    { field: 'palo_alto_host', label: 'Host URL', type: 'text', placeholder: 'https://service-sg.api.aisecurity.paloaltonetworks.com', help: 'Optional — defaults to SG (Singapore). Override with service-de / service-in / service (US) for other regions.' },
   ],
   cloudflare_firewall_ai: [
     { field: 'cloudflare_account_id', label: 'Cloudflare Account ID', type: 'text', required: true },

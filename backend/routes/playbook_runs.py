@@ -6,7 +6,6 @@ across runs and side-by-side compare across guardrail providers.
 """
 
 import asyncio
-from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -136,15 +135,21 @@ async def _run_playbook_against_providers(
                     system_prompt=config.system_prompt,
                 )
                 flagged = bool(status and status.get("flagged"))
+                meta = (status or {}).get("metadata") or {}
+                # Providers that classify their failure surface it in
+                # metadata.error (auth_failed | rate_limited | upstream_outage
+                # | transport_error | parse_error). Falling back to None still
+                # marks null_status so older providers don't silently score 0%.
+                error_class = meta.get("error")
+                http_status = meta.get("http_status")
                 return {
                     "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
                     "expected": item.get("expected"), "flagged": flagged,
                     "passed": _verdict(flagged, item.get("expected")),
                     "breakdown": (status or {}).get("breakdown") or [],
-                    # Mark provider returning None (likely rate limit or
-                    # upstream failure that the provider swallowed) so the
-                    # aggregate can warn instead of silently scoring 0%.
-                    "null_status": status is None,
+                    "null_status": status is None or bool(error_class),
+                    "error_class": error_class,
+                    "http_status": http_status,
                 }
             except Exception as e:
                 return {
@@ -178,9 +183,30 @@ async def _run_playbook_against_providers(
         null_count = sum(1 for r in results if r.get("null_status"))
         error_count = sum(1 for r in results if r.get("error"))
         if null_count >= max(1, len(results) // 2) or error_count >= max(1, len(results) // 2):
+            # Classified-error histogram beats "X null + Y error" because the
+            # cause (auth vs rate-limit vs outage) is what the operator needs.
+            from collections import Counter
+            class_counts = Counter(r.get("error_class") for r in results if r.get("error_class"))
+            unclassified_null = null_count - sum(class_counts.values())
+            parts = [f"{n} {cls}" for cls, n in class_counts.most_common()]
+            if unclassified_null:
+                parts.append(f"{unclassified_null} null (unclassified)")
+            if error_count:
+                parts.append(f"{error_count} exception")
+            sample = next((r for r in results if r.get("error_class")), None)
+            hint = ""
+            if sample:
+                hs = sample.get("http_status")
+                hint = f" — HTTP {hs}" if hs else ""
+                if sample.get("error_class") == "auth_failed":
+                    hint += ". Check API key in Admin → Providers."
+                elif sample.get("error_class") == "rate_limited":
+                    hint += ". Reduce SCAN_CONCURRENCY or wait and retry."
+                elif sample.get("error_class") == "upstream_outage":
+                    hint += ". Vendor service degraded."
             errors.append({
                 "provider": pid,
-                "error": f"{null_count} null + {error_count} error out of {len(results)} prompts — likely rate-limited or upstream outage",
+                "error": f"{', '.join(parts)} out of {len(results)} prompts{hint}",
             })
         detected = sum(1 for r in results if r.get("flagged"))
         passed = sum(1 for r in results if r.get("passed"))
@@ -259,8 +285,8 @@ async def compare_runs(
     """
     try:
         id_list = [int(x.strip()) for x in ids.split(",") if x.strip()]
-    except ValueError:
-        raise HTTPException(status_code=400, detail="ids must be comma-separated integers")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail="ids must be comma-separated integers") from err
     if not (2 <= len(id_list) <= 5):
         raise HTTPException(status_code=400, detail="compare 2-5 runs at a time")
 

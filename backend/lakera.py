@@ -2,6 +2,8 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
+from .guardrail_provider.base import classify_http, make_error_status
+
 LAKERA_URL = "https://api.lakera.ai/v2/guard"
 LAKERA_RESULTS_URL = "https://api.lakera.ai/v2/guard/results"
 
@@ -68,8 +70,24 @@ async def check_interaction(
 
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(LAKERA_URL, json=payload, headers=headers)
-            response.raise_for_status()
-            result = response.json()
+            if response.status_code >= 400:
+                error_class = classify_http(response.status_code)
+                print(f"Lakera HTTP {response.status_code} ({error_class}): {response.text[:200]}")
+                status = make_error_status(
+                    "lakera",
+                    error_class,
+                    http_status=response.status_code,
+                    detail=response.text,
+                )
+                _last_lakera_result = status
+                return status
+            try:
+                result = response.json()
+            except Exception as e:
+                print(f"Lakera parse error: {e}")
+                status = make_error_status("lakera", "parse_error", detail=str(e))
+                _last_lakera_result = status
+                return status
 
             # Store the last result for the frontend to poll
             _last_lakera_result = result
@@ -77,7 +95,9 @@ async def check_interaction(
             return result
     except Exception as e:
         print(f"Lakera API error: {e}")
-        return None
+        status = make_error_status("lakera", "transport_error", detail=str(e))
+        _last_lakera_result = status
+        return status
 
 
 def _normalize_results_level(raw: Optional[str]) -> str:
@@ -157,16 +177,33 @@ async def get_guard_results_for_ui(
         }
         async with httpx.AsyncClient(timeout=15) as client:
             response = await client.post(LAKERA_RESULTS_URL, json=payload, headers=headers)
-            response.raise_for_status()
-            raw = response.json()
+            if response.status_code >= 400:
+                error_class = classify_http(response.status_code)
+                print(f"Lakera /guard/results HTTP {response.status_code} ({error_class}): {response.text[:200]}")
+                status = make_error_status(
+                    "lakera", error_class,
+                    http_status=response.status_code, detail=response.text,
+                )
+                _last_lakera_result = status
+                return status
+            try:
+                raw = response.json()
+            except Exception as e:
+                status = make_error_status("lakera", "parse_error", detail=str(e))
+                _last_lakera_result = status
+                return status
             if not isinstance(raw, dict):
-                return None
+                status = make_error_status("lakera", "parse_error", detail="non-dict response")
+                _last_lakera_result = status
+                return status
             shaped = _guard_results_to_overlay_shape(raw)
             _last_lakera_result = shaped
             return shaped
     except Exception as e:
         print(f"Lakera /guard/results API error: {e}")
-        return None
+        status = make_error_status("lakera", "transport_error", detail=str(e))
+        _last_lakera_result = status
+        return status
 
 
 def get_last_result() -> Optional[Dict[str, Any]]:

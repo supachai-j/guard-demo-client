@@ -10,7 +10,10 @@ interface UICtx {
   lang: Lang;
   setLang: (l: Lang) => void;
   toggleLang: () => void;
-  t: (key: keyof Dict) => string;
+  // Optional `params` substitutes `{key}` tokens in the resolved string —
+  // e.g. t('guardrailResults', {provider: 'Bedrock'}) → "Bedrock Results".
+  // Tokens with no matching param are left as-is (safer than blank).
+  t: (key: keyof Dict, params?: Record<string, string | number>) => string;
   mode: ColorMode;
   setMode: (m: ColorMode) => void;
   toggleMode: () => void;
@@ -67,9 +70,13 @@ export const UIProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   const toggleLang = useCallback(() => setLang(lang === 'en' ? 'th' : 'en'), [lang, setLang]);
   const toggleMode = useCallback(() => setMode(mode === 'light' ? 'dark' : 'light'), [mode, setMode]);
 
-  const t = useCallback((key: keyof Dict) => {
+  const t = useCallback((key: keyof Dict, params?: Record<string, string | number>) => {
     const dict = LOCALES[lang] || EN;
-    return dict[key] || EN[key] || (key as string);
+    const raw = dict[key] || EN[key] || (key as string);
+    if (!params) return raw;
+    return raw.replace(/\{(\w+)\}/g, (m, name) =>
+      name in params ? String(params[name]) : m,
+    );
   }, [lang]);
 
   const value = useMemo(

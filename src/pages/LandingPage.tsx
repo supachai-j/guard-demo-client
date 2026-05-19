@@ -9,6 +9,7 @@ import UIToggles from '../components/UIToggles';
 import { AppConfig } from '../types';
 import { apiService } from '../services/api';
 import { useUI } from '../i18n/UIContext';
+import { guardrailShortLabel } from '../i18n/guardrailLabel';
 
 const LandingPage: React.FC = () => {
   const { t } = useUI();
@@ -133,7 +134,7 @@ const LandingPage: React.FC = () => {
               <button
                 onClick={() => setIsCompareOpen(true)}
                 className="flex items-center justify-center gap-2 border border-primary-600 text-primary-700 dark:text-primary-500 px-6 py-3 rounded-lg hover:bg-primary-50 dark:hover:bg-slate-800 transition-colors font-medium"
-                title={t('compareCtaTooltip')}
+                title={t('compareCtaTooltip', { provider: guardrailShortLabel(config?.guardrail_provider) })}
               >
                 <GitCompare className="w-4 h-4" />
                 {t('compareCta')}
@@ -212,10 +213,11 @@ const LandingPage: React.FC = () => {
         config={config}
       />
 
-      {/* Lakera Overlay */}
+      {/* Guardrail overlay */}
       <LakeraOverlay
         isOpen={isLakeraOverlayOpen}
         onClose={() => setIsLakeraOverlayOpen(false)}
+        config={config}
       />
 
       {/* Side-by-side compare modal */}

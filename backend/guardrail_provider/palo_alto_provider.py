@@ -39,12 +39,12 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from .. import lakera as legacy_lakera
-from .base import GuardrailProvider, GuardrailStatus
+from .base import GuardrailProvider, GuardrailStatus, classify_http, make_error_status
 
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_HOST = "service.api.aisecurity.paloaltonetworks.com"
+_DEFAULT_HOST = "service-sg.api.aisecurity.paloaltonetworks.com"
 
 # Palo Alto detector flag → our shared detector_type
 _DETECTOR_MAP = {
@@ -161,19 +161,21 @@ class PaloAltoAirsProvider(GuardrailProvider):
                 resp = await client.post(url, headers=headers, json=body)
         except Exception as e:  # noqa: BLE001
             logger.warning("Palo Alto AIRS transport error: %s", e)
-            return None
+            return make_error_status(self.id, "transport_error", detail=str(e))
 
         if resp.status_code >= 400:
+            error_class = classify_http(resp.status_code)
             logger.warning(
-                "Palo Alto AIRS HTTP %s: %s", resp.status_code, resp.text[:200]
+                "Palo Alto AIRS HTTP %s (%s): %s",
+                resp.status_code, error_class, resp.text[:200],
             )
-            return None
+            return make_error_status(self.id, error_class, http_status=resp.status_code, detail=resp.text)
 
         try:
             data = resp.json()
         except Exception as e:  # noqa: BLE001
             logger.warning("Palo Alto AIRS parse error: %s", e)
-            return None
+            return make_error_status(self.id, "parse_error", detail=str(e))
 
         action = (data.get("action") or "").lower()
         category = (data.get("category") or "").lower()
