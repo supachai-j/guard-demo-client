@@ -22,10 +22,16 @@ class AgentRequest(BaseModel):
 def _user_content(message: str, images: Optional[List[str]]):
     """Build the user message content. Plain string when no images; OpenAI
     vision content-block list when images are present. LiteLLM translates the
-    block format to each provider's native vision schema."""
+    block format to each provider's native vision schema.
+
+    Anthropic rejects empty text blocks ("text content blocks must be
+    non-empty"), so the text block is omitted when the message is blank —
+    image-only content is valid."""
     if not images:
         return message
-    blocks: List[Dict[str, Any]] = [{"type": "text", "text": message}]
+    blocks: List[Dict[str, Any]] = []
+    if message and message.strip():
+        blocks.append({"type": "text", "text": message})
     for url in images:
         if url:
             blocks.append({"type": "image_url", "image_url": {"url": url}})
