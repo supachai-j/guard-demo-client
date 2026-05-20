@@ -51,6 +51,7 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
         message=request.message,
         session_id=request.session_id,
         conversation_id=request.conversation_id,
+        images=request.images,
     )
 
     # Run agent
@@ -120,12 +121,13 @@ async def chat_stream(request: ChatRequest, db: Session = Depends(get_db)):
                 return
 
         # Build messages (no tools in stream path)
+        from ..agent import _user_content
         messages: List[Dict[str, Any]] = []
         if config.system_prompt:
             messages.append({"role": "system", "content": config.system_prompt})
         if history:
             messages.extend(history)
-        messages.append({"role": "user", "content": request.message})
+        messages.append({"role": "user", "content": _user_content(request.message, request.images)})
 
         # Stream the LLM
         full_text_parts: List[str] = []

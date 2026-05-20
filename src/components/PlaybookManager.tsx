@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, Edit3, X, Save, Lock, Copy } from 'lucide-react';
+import { Plus, Trash2, Edit3, X, Save, Lock, Copy, ImagePlus } from 'lucide-react';
 import { apiService } from '../services/api';
 
 type CatalogEntry = {
@@ -15,6 +15,8 @@ type PromptRow = {
   prompt: string;
   expected: 'blocked' | 'allowed';
   description?: string;
+  // Optional base64 data URL for image-injection / multimodal scenarios (4.3.14, 4.3.19).
+  image_b64?: string;
 };
 
 type PlaybookDetail = {
@@ -90,6 +92,7 @@ const PlaybookManager: React.FC<Props> = ({ open, onClose, onChanged }) => {
           prompt: p.prompt || '',
           expected: p.expected === 'allowed' ? 'allowed' : 'blocked',
           description: p.description,
+          image_b64: p.image_b64,
         })),
         is_builtin: !!data.is_builtin,
       });
@@ -112,6 +115,7 @@ const PlaybookManager: React.FC<Props> = ({ open, onClose, onChanged }) => {
           prompt: p.prompt || '',
           expected: p.expected === 'allowed' ? 'allowed' : 'blocked',
           description: p.description,
+          image_b64: p.image_b64,
         })),
         is_builtin: false,
       });
@@ -163,6 +167,7 @@ const PlaybookManager: React.FC<Props> = ({ open, onClose, onChanged }) => {
           category: p.category.trim() || 'Custom',
           prompt: p.prompt,
           expected: p.expected,
+          ...(p.image_b64 ? { image_b64: p.image_b64 } : {}),
         })),
       };
       if (editing.id) {
@@ -186,6 +191,18 @@ const PlaybookManager: React.FC<Props> = ({ open, onClose, onChanged }) => {
       ...editing,
       prompts: editing.prompts.map((p, idx) => (idx === i ? { ...p, ...patch } : p)),
     });
+  };
+
+  // Attach an image (base64 data URL) to a prompt row for multimodal scenarios.
+  const attachImageToRow = (i: number, file: File | undefined) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    if (file.size > 4 * 1024 * 1024) {
+      setError('Image exceeds 4MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => updateRow(i, { image_b64: reader.result as string });
+    reader.readAsDataURL(file);
   };
 
   const addRow = () => {
@@ -392,6 +409,31 @@ const PlaybookManager: React.FC<Props> = ({ open, onClose, onChanged }) => {
                               rows={1}
                               className="w-full px-1.5 py-1 border border-transparent hover:border-gray-300 dark:hover:border-slate-600 rounded bg-transparent dark:text-slate-100 resize-y min-h-[28px]"
                             />
+                            <div className="flex items-center gap-2 mt-1">
+                              {p.image_b64 ? (
+                                <div className="relative inline-block">
+                                  <img src={p.image_b64} alt="prompt attachment" className="w-10 h-10 object-cover rounded border border-gray-300 dark:border-slate-600" />
+                                  <button
+                                    onClick={() => updateRow(i, { image_b64: undefined })}
+                                    className="absolute -top-1.5 -right-1.5 bg-gray-700 text-white rounded-full p-0.5 hover:bg-gray-900"
+                                    title="Remove image"
+                                  >
+                                    <X className="w-2.5 h-2.5" />
+                                  </button>
+                                </div>
+                              ) : (
+                                <label className="text-[10px] text-gray-400 hover:text-primary-600 cursor-pointer inline-flex items-center gap-1">
+                                  <ImagePlus className="w-3 h-3" />
+                                  <span>image</span>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="hidden"
+                                    onChange={e => { attachImageToRow(i, e.target.files?.[0]); e.target.value = ''; }}
+                                  />
+                                </label>
+                              )}
+                            </div>
                           </td>
                           <td className="p-1 text-right">
                             <button

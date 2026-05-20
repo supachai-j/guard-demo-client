@@ -14,6 +14,22 @@ class AgentRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     conversation_id: Optional[int] = None
+    # Base64 data URLs (data:image/png;base64,...) for vision-capable models.
+    # Guardrails scan the text `message` only; images pass through to the LLM.
+    images: Optional[List[str]] = None
+
+
+def _user_content(message: str, images: Optional[List[str]]):
+    """Build the user message content. Plain string when no images; OpenAI
+    vision content-block list when images are present. LiteLLM translates the
+    block format to each provider's native vision schema."""
+    if not images:
+        return message
+    blocks: List[Dict[str, Any]] = [{"type": "text", "text": message}]
+    for url in images:
+        if url:
+            blocks.append({"type": "image_url", "image_url": {"url": url}})
+    return blocks
 
 
 class AgentResult(BaseModel):
@@ -183,8 +199,8 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
     if history:
         messages.extend(history)
 
-    # Add user message
-    messages.append({"role": "user", "content": req.message})
+    # Add user message — vision content-block when images attached, else plain text.
+    messages.append({"role": "user", "content": _user_content(req.message, req.images)})
 
     # Step 4: Call LLM with tools
     total_input_tokens = 0

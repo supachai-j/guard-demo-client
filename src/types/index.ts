@@ -154,6 +154,9 @@ export interface ChatRequest {
   message: string;
   session_id?: string;
   prompt_id?: number;
+  conversation_id?: number;
+  // Base64 data URLs for image upload (vision-capable models).
+  images?: string[];
 }
 
 export interface ChatResponse {
@@ -188,6 +191,7 @@ export interface Tool {
   type: string;
   enabled: boolean;
   config_json?: any;
+  disabled_tools?: string[];
   created_at: string;
   updated_at: string;
 }
@@ -199,9 +203,26 @@ export interface ToolCreate {
   type: string;
   enabled: boolean;
   config_json?: any;
+  disabled_tools?: string[];
 }
 
 export interface ToolUpdate extends ToolCreate {}
+
+/** One MCP function the server advertises, flattened from discovery_results. */
+export interface DiscoveredMcpTool {
+  name: string;
+  description: string;
+  disabled: boolean;
+}
+
+export interface ToolCapabilities {
+  tool_id: number;
+  tool_name: string;
+  capabilities: any | null;
+  tools: DiscoveredMcpTool[];
+  disabled_tools: string[];
+  message?: string;
+}
 
 // Lakera types
 export interface LakeraDetectorResult {
@@ -229,6 +250,8 @@ export interface ChatMessage {
   timestamp: Date;
   tool_traces?: any[];
   lakera?: any;
+  // Base64 data URLs attached to a user message (rendered as thumbnails).
+  images?: string[];
 }
 
 // Demo Prompt types

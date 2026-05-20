@@ -150,11 +150,13 @@ async def _run_playbook_against_providers(
                     "null_status": status is None or bool(error_class),
                     "error_class": error_class,
                     "http_status": http_status,
+                    "has_image": bool(item.get("image_b64")),
                 }
             except Exception as e:
                 return {
                     "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
                     "expected": item.get("expected"), "flagged": False, "passed": False, "error": str(e),
+                    "has_image": bool(item.get("image_b64")),
                 }
 
     disabled_set = set(getattr(config, "disabled_providers", None) or [])

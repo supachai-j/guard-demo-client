@@ -8,6 +8,7 @@ import {
   Tool,
   ToolCreate,
   ToolUpdate,
+  ToolCapabilities,
   LakeraResult,
   DemoPrompt,
   DemoPromptCreate,
@@ -211,6 +212,17 @@ class ApiService {
     return this.request(`/tools/test/${id}`, {
       method: 'POST',
       body: JSON.stringify(parameters),
+    });
+  }
+
+  async getToolCapabilities(id: number): Promise<ToolCapabilities> {
+    return this.request<ToolCapabilities>(`/tools/${id}/capabilities`);
+  }
+
+  async updateDisabledTools(id: number, disabled: string[]): Promise<{ tool_id: number; disabled_tools: string[] }> {
+    return this.request(`/tools/${id}/disabled-tools`, {
+      method: 'PATCH',
+      body: JSON.stringify({ disabled }),
     });
   }
 
@@ -518,14 +530,14 @@ class ApiService {
   }
 
   // Streaming chat — returns an async iterator of token strings.
-  async *streamChat(message: string, conversationId?: number, sessionId?: string): AsyncGenerator<{ kind: 'chunk' | 'done' | 'blocked' | 'error'; data: any }> {
+  async *streamChat(message: string, conversationId?: number, sessionId?: string, images?: string[]): AsyncGenerator<{ kind: 'chunk' | 'done' | 'blocked' | 'error'; data: any }> {
     const token = getToken();
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     if (token) headers.Authorization = `Bearer ${token}`;
     const resp = await fetch(`${API_BASE}/chat/stream`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ message, conversation_id: conversationId, session_id: sessionId }),
+      body: JSON.stringify({ message, conversation_id: conversationId, session_id: sessionId, ...(images && images.length ? { images } : {}) }),
     });
     if (!resp.body) throw new Error('No streaming response body');
     const reader = resp.body.getReader();

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Bot, User, Loader2, MessageCircle, Minimize2 } from 'lucide-react';
+import { Send, Bot, User, Loader2, MessageCircle, Minimize2, ImagePlus, X } from 'lucide-react';
 import { ChatMessage, LakeraResult, AppConfig, DemoPromptSuggestion } from '../types';
 import { apiService } from '../services/api';
 import { useUI } from '../i18n/UIContext';
@@ -25,8 +25,36 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
   const [promptIdForNextSend, setPromptIdForNextSend] = useState<number | null>(null);
   const [conversationId, setConversationId] = useState<number | undefined>(undefined);
   const [streamMode, setStreamMode] = useState<boolean>(() => localStorage.getItem('chat_stream_mode') === '1');
+  const [pendingImages, setPendingImages] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Read selected image files → base64 data URLs for vision-capable models.
+  // 4MB/file cap keeps the request body sane; most providers reject larger inline images anyway.
+  const MAX_IMAGE_BYTES = 4 * 1024 * 1024;
+  const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    e.target.value = ''; // allow re-selecting the same file
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      if (file.size > MAX_IMAGE_BYTES) {
+        console.warn(`Skipping ${file.name}: exceeds 4MB`);
+        continue;
+      }
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      setPendingImages(prev => [...prev, dataUrl]);
+    }
+  };
+
+  const removePendingImage = (idx: number) => {
+    setPendingImages(prev => prev.filter((_, i) => i !== idx));
+  };
 
   // Handle external control of expanded state
   useEffect(() => {
@@ -123,17 +151,20 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+    if ((!inputMessage.trim() && pendingImages.length === 0) || isLoading) return;
 
+    const sentImages = pendingImages;
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
       role: 'user',
       content: inputMessage,
       timestamp: new Date(),
+      ...(sentImages.length ? { images: sentImages } : {}),
     };
 
     setMessages(prev => [...prev, userMessage]);
     setInputMessage('');
+    setPendingImages([]);
     setIsLoading(true);
 
     try {
@@ -144,7 +175,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
           id: assistantId, role: 'assistant', content: '', timestamp: new Date(),
         }]);
         let acc = '';
-        for await (const ev of apiService.streamChat(inputMessage, conversationId)) {
+        for await (const ev of apiService.streamChat(inputMessage, conversationId, undefined, sentImages.length ? sentImages : undefined)) {
           if (ev.kind === 'chunk' && ev.data?.text) {
             acc += ev.data.text;
             setMessages(prev => prev.map(m => m.id === assistantId ? { ...m, content: acc } : m));
@@ -168,6 +199,7 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
         message: inputMessage,
         ...(promptIdForNextSend != null ? { prompt_id: promptIdForNextSend } : {}),
         ...(conversationId != null ? { conversation_id: conversationId } : {}),
+        ...(sentImages.length ? { images: sentImages } : {}),
       });
 
       const assistantMessage: ChatMessage = {
@@ -300,7 +332,14 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
                       <Bot className="w-4 h-4 mt-1 flex-shrink-0" />
                     )}
                     <div className="flex-1">
-                      <p className="text-sm">{message.content}</p>
+                      {message.images && message.images.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-1.5">
+                          {message.images.map((src, idx) => (
+                            <img key={idx} src={src} alt={`attachment ${idx + 1}`} className="w-20 h-20 object-cover rounded-md border border-white/30" />
+                          ))}
+                        </div>
+                      )}
+                      {message.content && <p className="text-sm">{message.content}</p>}
                       {message.tool_traces && message.tool_traces.length > 0 && (
                         <div className="mt-2 text-xs text-gray-500">
                           <p>Tools used: {message.tool_traces.length}</p>
@@ -332,7 +371,41 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
           {/* Input */}
           <div className="p-4 border-t border-gray-200">
             <div className="relative">
+              {/* Pending image previews */}
+              {pendingImages.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {pendingImages.map((src, idx) => (
+                    <div key={idx} className="relative">
+                      <img src={src} alt={`upload ${idx + 1}`} className="w-14 h-14 object-cover rounded-lg border border-gray-300" />
+                      <button
+                        onClick={() => removePendingImage(idx)}
+                        className="absolute -top-1.5 -right-1.5 bg-gray-700 text-white rounded-full p-0.5 hover:bg-gray-900"
+                        aria-label="Remove image"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                className="hidden"
+                onChange={handleImageSelect}
+              />
               <div className="flex space-x-2">
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isLoading}
+                  className="px-3 py-2 border border-gray-300 rounded-lg text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed self-end"
+                  aria-label="Attach image"
+                  title="Attach image (vision-capable models)"
+                >
+                  <ImagePlus className="w-4 h-4" />
+                </button>
                 <div className="flex-1 relative">
                   <textarea
                     ref={inputRef}
@@ -359,8 +432,8 @@ const ChatWidget: React.FC<ChatWidgetProps> = ({ onLakeraToggle, forceExpanded, 
                 </div>
                 <button
                   onClick={handleSendMessage}
-                  disabled={!inputMessage.trim() || isLoading}
-                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  disabled={(!inputMessage.trim() && pendingImages.length === 0) || isLoading}
+                  className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed self-end"
                 >
                   <Send className="w-4 h-4" />
                 </button>

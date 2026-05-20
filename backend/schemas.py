@@ -122,6 +122,9 @@ class ChatRequest(BaseModel):
     session_id: Optional[str] = None
     prompt_id: Optional[int] = None
     conversation_id: Optional[int] = None
+    # Base64 data URLs for image upload (vision-capable models). Guardrails
+    # scan the text `message`; images pass through to the LLM.
+    images: Optional[List[str]] = None
 
 
 class ChatResponse(BaseModel):
@@ -156,6 +159,12 @@ class ToolBase(BaseModel):
     type: str = "mcp"
     enabled: bool = True
     config_json: Optional[Dict[str, Any]] = None
+    disabled_tools: List[str] = []
+
+
+class DisabledToolsUpdate(BaseModel):
+    """Body for PATCH /api/tools/{id}/disabled-tools — replaces the deny list."""
+    disabled: List[str]
 
 
 class ToolResponse(ToolBase):
@@ -218,6 +227,11 @@ class PlaybookPromptIn(BaseModel):
     prompt: str
     expected: str = "blocked"  # "blocked" or "allowed"
     description: Optional[str] = None
+    # Optional base64 data URL for image-injection / multimodal-moderation
+    # scenarios (4.3.14, 4.3.19). Guardrails scan the text `prompt` (which
+    # represents the OCR-extracted / accompanying text); the image rides along
+    # for display + for vision-capable scan paths.
+    image_b64: Optional[str] = None
 
 
 class PlaybookCreate(BaseModel):
