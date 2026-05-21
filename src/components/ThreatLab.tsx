@@ -521,6 +521,12 @@ const PlaybookPanel: React.FC = () => {
     passRate: number; detectionRate: number; provider: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  // Guardrail picker — when empty, run against the active provider (default).
+  // When one or more are ticked, fan the playbook across them via /multi-provider.
+  const [providers, setProviders] = useState<Array<{ id: string; display_name: string; configured: boolean }>>([]);
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
+  const [matrix, setMatrix] = useState<{ runs: any[]; prompts: any[] } | null>(null);
+  const [runErrors, setRunErrors] = useState<string[]>([]);
 
   const reloadCatalog = () => {
     apiService.listPlaybooks().then(d => {
@@ -534,23 +540,42 @@ const PlaybookPanel: React.FC = () => {
 
   useEffect(() => {
     reloadCatalog();
+    apiService.getGuardrailProviders().then(d => setProviders((d.providers || []) as any)).catch(() => {});
   }, []);
+
+  const toggleProvider = (id: string) => {
+    setSelectedProviders(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
 
   const run = async () => {
     setLoading(true);
     setResults([]);
     setSummary(null);
+    setMatrix(null);
+    setRunErrors([]);
     try {
-      const data = await apiService.runPlaybook(activeId);
-      setResults(data.results || []);
-      setSummary({
-        passed: data.passed ?? data.detected,
-        detected: data.detected,
-        total: data.total,
-        passRate: data.pass_rate ?? data.detection_rate,
-        detectionRate: data.detection_rate,
-        provider: data.guardrail_display_name,
-      });
+      if (selectedProviders.size === 0) {
+        // Default path — run against whatever guardrail is active in Security.
+        const data = await apiService.runPlaybook(activeId);
+        setResults(data.results || []);
+        setSummary({
+          passed: data.passed ?? data.detected,
+          detected: data.detected,
+          total: data.total,
+          passRate: data.pass_rate ?? data.detection_rate,
+          detectionRate: data.detection_rate,
+          provider: data.guardrail_display_name,
+        });
+      } else {
+        // Chosen guardrails — fan across the selected providers.
+        const data = await apiService.runPlaybookMultiProvider(activeId, Array.from(selectedProviders));
+        setMatrix({ runs: data.runs || [], prompts: data.prompts || [] });
+        setRunErrors((data.errors || []).map((e: any) => `${e.provider}: ${e.error}`));
+      }
     } finally {
       setLoading(false);
     }
@@ -606,7 +631,7 @@ const PlaybookPanel: React.FC = () => {
             ))}
           </select>
           <button onClick={run} disabled={loading} className="inline-flex items-center gap-1 px-3 py-1.5 rounded text-sm bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
-            <Shield className="w-4 h-4" /> {loading ? 'Scanning…' : 'Run against active guardrail'}
+            <Shield className="w-4 h-4" /> {loading ? 'Scanning…' : selectedProviders.size === 0 ? 'Run against active guardrail' : `Run against ${selectedProviders.size} guardrail${selectedProviders.size > 1 ? 's' : ''}`}
           </button>
           <button
             onClick={() => setManagerOpen(true)}
@@ -615,6 +640,34 @@ const PlaybookPanel: React.FC = () => {
           >
             <Settings className="w-4 h-4" /> Manage
           </button>
+        </div>
+        {/* Guardrail picker — leave all unticked to use the active guardrail. */}
+        <div className="mt-2">
+          <div className="text-xs text-gray-500 dark:text-slate-400 mb-1">
+            Guardrail{selectedProviders.size === 0 ? ' — using active (none selected)' : 's to run against'}:
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {providers.map(pr => (
+              <label
+                key={pr.id}
+                className={`inline-flex items-center gap-1.5 px-2 py-1 rounded border text-xs cursor-pointer ${
+                  selectedProviders.has(pr.id)
+                    ? 'bg-primary-50 border-primary-400 text-primary-800 dark:bg-primary-900/30 dark:text-primary-200'
+                    : 'bg-white dark:bg-slate-900 border-gray-300 dark:border-slate-600 text-gray-600 dark:text-slate-300'
+                } ${pr.configured === false ? 'opacity-50' : ''}`}
+                title={pr.configured === false ? 'Not configured — set credentials in Admin → Providers' : ''}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedProviders.has(pr.id)}
+                  onChange={() => toggleProvider(pr.id)}
+                  disabled={pr.configured === false}
+                />
+                {pr.display_name}
+                {pr.configured === false && <span className="text-[10px]">(no key)</span>}
+              </label>
+            ))}
+          </div>
         </div>
         {summary && (
           <div className="mt-3 flex items-center flex-wrap gap-3 text-sm">
@@ -627,34 +680,86 @@ const PlaybookPanel: React.FC = () => {
             </span>
           </div>
         )}
+        {matrix && matrix.runs.length > 0 && (
+          <div className="mt-3 flex items-center flex-wrap gap-3 text-sm">
+            {matrix.runs.map((rn: any) => (
+              <span key={rn.id} className={`px-2 py-1 rounded ${rn.pass_rate >= 80 ? 'bg-green-100 text-green-800' : rn.pass_rate >= 50 ? 'bg-amber-100 text-amber-800' : 'bg-red-100 text-red-800'}`}>
+                <span className="font-semibold">{rn.guardrail_display_name}</span>: {rn.pass_rate}% ({rn.detected}/{rn.total} detected)
+              </span>
+            ))}
+          </div>
+        )}
+        {runErrors.length > 0 && (
+          <div className="mt-2 text-xs text-red-600 dark:text-red-400">
+            {runErrors.map((e, i) => <div key={i}>⚠️ {e}</div>)}
+          </div>
+        )}
       </div>
       <div className="overflow-x-auto bg-white dark:bg-slate-800 rounded border border-gray-200 dark:border-slate-700">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300">
-            <tr>
-              <th className="text-left p-2 w-20">ID</th>
-              <th className="text-left p-2">Category</th>
-              <th className="text-left p-2">Prompt</th>
-              <th className="text-left p-2 w-24">Expected</th>
-              <th className="text-left p-2 w-32">Result</th>
-            </tr>
-          </thead>
-          <tbody>
-            {results.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-gray-500">Pick a playbook and click Run.</td></tr>}
-            {results.map(r => (
-              <tr key={r.id} className="border-t border-gray-100 dark:border-slate-700">
-                <td className="p-2 font-mono text-xs dark:text-slate-200">{r.id}</td>
-                <td className="p-2 dark:text-slate-200">{r.category}</td>
-                <td className="p-2 max-w-md truncate dark:text-slate-300" title={r.prompt}>{r.prompt}</td>
-                <td className="p-2">{renderExpected(r.expected)}</td>
-                <td className="p-2">
-                  {renderVerdict(r)}
-                  {r.error && <div className="text-xs text-red-600 mt-1">{r.error}</div>}
-                </td>
+        {matrix ? (
+          /* Multi-guardrail matrix: one Result column per chosen provider. */
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300">
+              <tr>
+                <th className="text-left p-2 w-20">ID</th>
+                <th className="text-left p-2">Prompt</th>
+                <th className="text-left p-2 w-24">Expected</th>
+                {matrix.runs.map((rn: any) => (
+                  <th key={rn.id} className="text-left p-2">{rn.guardrail_display_name}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {matrix.prompts.length === 0 && <tr><td colSpan={3 + matrix.runs.length} className="p-4 text-center text-gray-500">No results.</td></tr>}
+              {matrix.prompts.map((p: any) => (
+                <tr key={p.id} className="border-t border-gray-100 dark:border-slate-700">
+                  <td className="p-2 font-mono text-xs dark:text-slate-200">{p.id}</td>
+                  <td className="p-2 max-w-sm truncate dark:text-slate-300" title={p.prompt}>{p.prompt}</td>
+                  <td className="p-2">{renderExpected(p.expected)}</td>
+                  {matrix.runs.map((rn: any) => {
+                    const cell = (p.by_run || {})[String(rn.id)] || (p.by_run || {})[rn.id];
+                    if (!cell) return <td key={rn.id} className="p-2 text-gray-400">—</td>;
+                    if (cell.error) return <td key={rn.id} className="p-2 text-xs text-red-600" title={cell.error}>error</td>;
+                    return (
+                      <td key={rn.id} className="p-2">
+                        {cell.passed
+                          ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-green-100 text-green-800"><CheckCircle2 className="w-3 h-3" /> {p.expected === 'allowed' ? 'allowed' : 'detected'}</span>
+                          : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-red-100 text-red-800"><AlertTriangle className="w-3 h-3" /> {p.expected === 'allowed' && cell.flagged ? 'false pos' : 'missed'}</span>}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 dark:bg-slate-900/50 text-gray-700 dark:text-slate-300">
+              <tr>
+                <th className="text-left p-2 w-20">ID</th>
+                <th className="text-left p-2">Category</th>
+                <th className="text-left p-2">Prompt</th>
+                <th className="text-left p-2 w-24">Expected</th>
+                <th className="text-left p-2 w-32">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {results.length === 0 && <tr><td colSpan={5} className="p-4 text-center text-gray-500">Pick a playbook and click Run.</td></tr>}
+              {results.map(r => (
+                <tr key={r.id} className="border-t border-gray-100 dark:border-slate-700">
+                  <td className="p-2 font-mono text-xs dark:text-slate-200">{r.id}</td>
+                  <td className="p-2 dark:text-slate-200">{r.category}</td>
+                  <td className="p-2 max-w-md truncate dark:text-slate-300" title={r.prompt}>{r.prompt}</td>
+                  <td className="p-2">{renderExpected(r.expected)}</td>
+                  <td className="p-2">
+                    {renderVerdict(r)}
+                    {r.error && <div className="text-xs text-red-600 mt-1">{r.error}</div>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
       <PlaybookManager
         open={managerOpen}
