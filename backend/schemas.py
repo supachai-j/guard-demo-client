@@ -59,6 +59,8 @@ class AppConfigResponse(AppConfigBase):
     portkey_base_url: Optional[str] = None
     thaillm_api_key: Optional[str] = None
     thaillm_base_url: Optional[str] = None
+    kong_api_key: Optional[str] = None
+    kong_base_url: Optional[str] = None
     cloudflare_account_id: Optional[str] = None
     cloudflare_api_token: Optional[str] = None
     cloudflare_gateway_id: Optional[str] = None
@@ -103,6 +105,8 @@ class AppConfigUpdate(AppConfigBase):
     portkey_base_url: Optional[str] = None
     thaillm_api_key: Optional[str] = None
     thaillm_base_url: Optional[str] = None
+    kong_api_key: Optional[str] = None
+    kong_base_url: Optional[str] = None
     cloudflare_account_id: Optional[str] = None
     cloudflare_api_token: Optional[str] = None
     cloudflare_gateway_id: Optional[str] = None

@@ -197,6 +197,18 @@ def _build_litellm_kwargs(
             thaillm_headers["apikey"] = api_key
         kwargs["extra_headers"] = thaillm_headers
         kwargs["custom_llm_provider"] = "openai"
+    elif pid == "kong":
+        # Kong AI Gateway exposes an OpenAI-compatible route (AI Proxy plugin).
+        # Auto-append /v1 if the operator gave the bare proxy/route URL, same
+        # convenience as litellm_proxy. When key-auth is enabled on the route,
+        # Kong expects the credential in an `apikey:` header (NOT Bearer) — the
+        # same plugin ThaiLLM sits behind. Bearer is left in place but harmless;
+        # the apikey header is what Kong's key-auth checks.
+        if base_url and not base_url.rstrip("/").endswith("/v1"):
+            kwargs["api_base"] = f"{base_url.rstrip('/')}/v1"
+        if api_key:
+            kwargs["extra_headers"] = {"apikey": api_key}
+        kwargs["custom_llm_provider"] = "openai"
     elif pid == "portkey":
         # Portkey is OpenAI-compatible; auth via x-portkey-api-key + optional virtual key.
         # Self-managed deployments can override the gateway URL via portkey_base_url.
@@ -459,6 +471,16 @@ def get_models(config: Optional[AppConfig] = None) -> List[str]:
         # it speaks the same {data: [{id: ...}, ...]} schema. Helper appends
         # /v1 itself, so strip a trailing /v1 first to avoid /v1/v1/models.
         base = (provider_base_url(cfg) or "http://thaillm.or.th/api").rstrip("/")
+        if base.endswith("/v1"):
+            base = base[:-3]
+        dyn = _get_models_litellm_proxy(provider_api_key(cfg), base)
+        if dyn:
+            return dyn
+    if pid == "kong":
+        # Kong AI Gateway's OpenAI route exposes /v1/models when configured.
+        # Same {data: [{id: ...}, ...]} schema as litellm_proxy; strip a
+        # trailing /v1 so the helper doesn't produce /v1/v1/models.
+        base = (provider_base_url(cfg) or "http://localhost:8000").rstrip("/")
         if base.endswith("/v1"):
             base = base[:-3]
         dyn = _get_models_litellm_proxy(provider_api_key(cfg), base)

@@ -172,6 +172,28 @@ PROVIDERS: Dict[str, Dict[str, Any]] = {
             "THaLLE-0.2-ThaiLLM-8B-fa",
         ],
     },
+    "kong": {
+        "display_name": "Kong AI Gateway",
+        "key_field": "kong_api_key",
+        # Self-hosted gateway — operator points this at their Kong proxy route
+        # that exposes the OpenAI-compatible AI Proxy plugin. Default is Kong's
+        # standard proxy port; override per deployment.
+        "base_url_field": "kong_base_url",
+        "default_base_url": "http://localhost:8000",
+        # Kong AI Gateway's AI Proxy plugin is OpenAI-compatible (POST
+        # /v1/chat/completions); routed via LiteLLM's openai custom_llm_provider
+        # — see _build_litellm_kwargs. The key (when present) is sent via the
+        # `apikey:` header for Kong's key-auth plugin, same as ThaiLLM.
+        "litellm_prefix": "",
+        # Kong routes may or may not have key-auth enabled, so don't hard-block
+        # on an empty key (mirrors litellm_proxy / portkey). The dispatch path
+        # adds the apikey header only when a key is configured.
+        "needs_key": False,
+        # No canonical Kong model list — it routes to whatever upstream the
+        # operator configured. Fetched dynamically from /v1/models when the
+        # gateway exposes it; otherwise the operator types the model name.
+        "models": [],
+    },
     "portkey": {
         "display_name": "Portkey (AI Gateway)",
         "key_field": "portkey_api_key",

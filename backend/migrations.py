@@ -118,6 +118,9 @@ _MIGRATIONS = [
         "tools", "disabled_tools", "TEXT",
         backfill="UPDATE tools SET disabled_tools = '[]' WHERE disabled_tools IS NULL",
     ),
+    # Kong AI Gateway — self-hosted OpenAI-compatible AI Proxy route.
+    Migration("app_config", "kong_api_key", "VARCHAR"),
+    Migration("app_config", "kong_base_url", "VARCHAR"),
 ]
 
 

@@ -1422,6 +1422,10 @@ const PROVIDER_FIELD_SCHEMAS: Record<string, ProviderFieldDef[]> = {
     { field: 'thaillm_api_key', label: 'ThaiLLM API Key', type: 'password', help: 'Optional — leave blank if the endpoint is open' },
     { field: 'thaillm_base_url', label: 'ThaiLLM Base URL', type: 'text', placeholder: 'http://thaillm.or.th/api', help: 'OpenAI-compatible endpoint. /v1 is auto-appended at call time if missing.' },
   ],
+  kong: [
+    { field: 'kong_api_key', label: 'Kong API Key', type: 'password', help: 'Optional — sent via the apikey header for Kong key-auth. Leave blank for unauthenticated routes.' },
+    { field: 'kong_base_url', label: 'Kong Base URL', type: 'text', placeholder: 'http://localhost:8000', help: 'Your Kong AI Gateway route exposing the OpenAI-compatible AI Proxy plugin. /v1 is auto-appended at call time if missing.' },
+  ],
   // Guardrail providers
   lakera: [
     { field: 'lakera_api_key', label: 'Lakera API Key', type: 'password', required: true },

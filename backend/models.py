@@ -68,6 +68,10 @@ class AppConfig(Base):
     # used when llm_provider="thaillm"). Default base URL applied in providers.py.
     thaillm_api_key = Column(String, nullable=True)
     thaillm_base_url = Column(String, nullable=True)
+    # Kong AI Gateway (self-hosted OpenAI-compatible AI Proxy route, used when
+    # llm_provider="kong"). Key sent via the apikey header for Kong key-auth.
+    kong_api_key = Column(String, nullable=True)
+    kong_base_url = Column(String, nullable=True)
     # Cloudflare Firewall for AI
     cloudflare_account_id = Column(String, nullable=True)
     cloudflare_api_token = Column(String, nullable=True)

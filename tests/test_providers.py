@@ -138,9 +138,9 @@ def test_list_providers_for_ui_includes_openrouter():
     assert {"openai", "anthropic", "openrouter", "portkey"}.issubset(ids)
 
 
-def test_list_providers_for_ui_eleven_total():
-    """We currently ship 11 LLM providers — guard against accidental removals."""
-    assert len(list_providers_for_ui()) == 11
+def test_list_providers_for_ui_twelve_total():
+    """We currently ship 12 LLM providers — guard against accidental removals."""
+    assert len(list_providers_for_ui()) == 12
 
 
 def test_list_providers_for_ui_payload_shape():

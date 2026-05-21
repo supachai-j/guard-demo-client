@@ -27,6 +27,7 @@ SECRET_CONFIG_FIELDS = (
     "portkey_api_key",
     "portkey_virtual_key",
     "thaillm_api_key",
+    "kong_api_key",
     "cloudflare_api_token",
 )
 

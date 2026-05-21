@@ -50,6 +50,9 @@ export interface AppConfig {
   // ThaiLLM (national Thai LLM gateway — OpenAI-compatible)
   thaillm_api_key?: string;
   thaillm_base_url?: string;
+  // Kong AI Gateway (self-hosted OpenAI-compatible AI Proxy route)
+  kong_api_key?: string;
+  kong_base_url?: string;
   // Cloudflare Firewall for AI
   cloudflare_account_id?: string;
   cloudflare_api_token?: string;
@@ -112,6 +115,9 @@ export interface AppConfigUpdate {
   // ThaiLLM (national Thai LLM gateway — OpenAI-compatible)
   thaillm_api_key?: string;
   thaillm_base_url?: string;
+  // Kong AI Gateway (self-hosted OpenAI-compatible AI Proxy route)
+  kong_api_key?: string;
+  kong_base_url?: string;
   // Cloudflare Firewall for AI
   cloudflare_account_id?: string;
   cloudflare_api_token?: string;
