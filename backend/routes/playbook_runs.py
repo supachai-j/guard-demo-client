@@ -240,6 +240,7 @@ async def _run_playbook_against_providers(
                 prompts_index[pid_key] = {
                     "id": pid_key, "category": r.get("category"),
                     "prompt": r.get("prompt"), "expected": r.get("expected"),
+                    "has_image": r.get("has_image", False),
                     "by_run": {},
                 }
             prompts_index[pid_key]["by_run"][str(run.id)] = {
