@@ -127,11 +127,26 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
 
     active_llm_pid = llm_provider_id(cfg)
 
+    # Image-injection pre-scan (§4.3.14): OCR any attached images and fold the
+    # extracted text into what the guardrail sees, so injection embedded in an
+    # image is caught before the prompt reaches the LLM. Text-only guardrails
+    # can't read images; this is the SI OCR stage in front of them.
+    guard_input_text = req.message
+    if req.images and cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
+        from . import ocr
+        for _img in req.images:
+            try:
+                _txt = await ocr.extract_text_from_image(_img, cfg)
+            except Exception:  # noqa: BLE001
+                _txt = ""
+            if _txt:
+                guard_input_text = f"{guard_input_text}\n{_txt}".strip() if guard_input_text else _txt
+
     if cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
         provider_name = active_guardrail.display_name
         print(f"🛡️ Checking user input with {provider_name}...")
-        # Pre-check messages: user only (system prompt added inside the provider if needed)
-        pre_check_messages = [{"role": "user", "content": req.message}]
+        # Pre-check messages: user text + OCR-extracted image text (image injection).
+        pre_check_messages = [{"role": "user", "content": guard_input_text}]
 
         lakera_result = await active_guardrail.check_interaction(
             messages=pre_check_messages,

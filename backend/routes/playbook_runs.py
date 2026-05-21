@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from .. import auth as _auth
+from .. import ocr
 from .. import playbooks as _builtin_playbooks
 from ..database import get_db
 from ..models import AppConfig, Playbook, PlaybookRun
@@ -127,9 +128,22 @@ async def _run_playbook_against_providers(
 
     async def _scan_one(provider, item, sem: asyncio.Semaphore):
         async with sem:
+            # Image-injection (§4.3.14): when a prompt carries an image, OCR it
+            # and scan the extracted text — that is the SI pipeline the guardrail
+            # sits behind. Combine with the (neutral) prompt text so the guardrail
+            # sees user-prompt + image-derived text together.
+            scan_text = item.get("prompt") or ""
+            ocr_text = None
+            if item.get("image_b64"):
+                try:
+                    ocr_text = await ocr.extract_text_from_image(item["image_b64"], config)
+                except Exception:  # noqa: BLE001
+                    ocr_text = None
+                if ocr_text:
+                    scan_text = f"{scan_text}\n{ocr_text}".strip() if scan_text else ocr_text
             try:
                 status = await provider.check_interaction(
-                    messages=[{"role": "user", "content": item["prompt"]}],
+                    messages=[{"role": "user", "content": scan_text}],
                     cfg=config,
                     meta=None,
                     system_prompt=config.system_prompt,
@@ -151,12 +165,14 @@ async def _run_playbook_against_providers(
                     "error_class": error_class,
                     "http_status": http_status,
                     "has_image": bool(item.get("image_b64")),
+                    "ocr_text": ocr_text,
                 }
             except Exception as e:
                 return {
                     "id": item["id"], "category": item.get("category"), "prompt": item["prompt"],
                     "expected": item.get("expected"), "flagged": False, "passed": False, "error": str(e),
                     "has_image": bool(item.get("image_b64")),
+                    "ocr_text": ocr_text,
                 }
 
     disabled_set = set(getattr(config, "disabled_providers", None) or [])
@@ -241,6 +257,7 @@ async def _run_playbook_against_providers(
                     "id": pid_key, "category": r.get("category"),
                     "prompt": r.get("prompt"), "expected": r.get("expected"),
                     "has_image": r.get("has_image", False),
+                    "ocr_text": r.get("ocr_text"),
                     "by_run": {},
                 }
             prompts_index[pid_key]["by_run"][str(run.id)] = {
