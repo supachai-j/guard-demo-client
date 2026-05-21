@@ -101,6 +101,48 @@ test('6. custom playbook CRUD via API (create → list → delete)', async ({ pa
   expect(remaining.some((p: any) => p.id === id)).toBeFalsy();
 });
 
+test('8. MCP connector — capabilities + disabled-tools PATCH round-trip', async ({ page }) => {
+  // Verifies the new Connector Management surface: register an MCP server,
+  // ask for its capabilities (empty until discovery runs — but the endpoint
+  // still returns the disabled_tools field), then PATCH the deny list and
+  // confirm the canonical state via GET.
+  await loginAs(page);
+  const token = await page.evaluate(() => localStorage.getItem('admin_token'));
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  const name = `e2e-mcp-${Date.now()}`;
+  const create = await page.request.post('http://localhost:8000/api/tools', {
+    headers,
+    data: { name, type: 'mcp', endpoint: 'http://127.0.0.1:9999/mcp', enabled: true, description: 'e2e smoke' },
+  });
+  expect(create.ok()).toBeTruthy();
+  const { id } = await create.json();
+
+  try {
+    // GET before any discovery: tools list empty, deny list empty.
+    const beforeResp = await page.request.get(`http://localhost:8000/api/tools/${id}/capabilities`, { headers });
+    expect(beforeResp.ok()).toBeTruthy();
+    const before = await beforeResp.json();
+    expect(before.disabled_tools).toEqual([]);
+    expect(Array.isArray(before.tools)).toBeTruthy();
+
+    // PATCH a deny list (server doesn't require the name to exist in
+    // discovery — operator may add it ahead of time).
+    const patch = await page.request.patch(`http://localhost:8000/api/tools/${id}/disabled-tools`, {
+      headers,
+      data: { disabled: ['search_web', 'send_email', 'search_web'] }, // dup is dedup-ed
+    });
+    expect(patch.ok()).toBeTruthy();
+    expect((await patch.json()).disabled_tools).toEqual(['search_web', 'send_email']);
+
+    // GET again confirms persistence + dedup ordering preserved.
+    const after = await (await page.request.get(`http://localhost:8000/api/tools/${id}/capabilities`, { headers })).json();
+    expect(after.disabled_tools).toEqual(['search_web', 'send_email']);
+  } finally {
+    await page.request.delete(`http://localhost:8000/api/tools/${id}`, { headers });
+  }
+});
+
 test('7. SSE audit stream emits hello handshake', async ({ page }) => {
   // The EventSource endpoint takes the JWT as a query param (browsers can't
   // attach Authorization headers to EventSource). The `hello` event fires

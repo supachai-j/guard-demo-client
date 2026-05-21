@@ -101,12 +101,19 @@ def openai_tools_manifest(db: Session) -> List[Dict[str, Any]]:
             discovery = capabilities.discovery_results
             tools_list = discovery.get("tools_list_params_0", {}).get("response", {}).get("result", {}).get("tools", [])
 
+            # Per-tool deny list (curated by the operator in the Connectors tab).
+            # Names in here are hidden from the LLM's tool manifest entirely.
+            deny = set(tool.disabled_tools or [])
+
             for mcp_tool in tools_list:
+                mcp_name = mcp_tool.get("name", "unknown")
+                if mcp_name in deny:
+                    continue
                 manifest.append(
                     {
                         "type": "function",
                         "function": {
-                            "name": mcp_tool.get("name", "unknown"),
+                            "name": mcp_name,
                             "description": mcp_tool.get("description", "")[:512],
                             "parameters": mcp_tool.get("inputSchema", {"type": "object", "properties": {}}),
                         },
@@ -169,6 +176,18 @@ async def execute(
         "endpoint": tool_metadata["db_tool_endpoint"],
         "description": tool_metadata["db_tool_description"],
     }
+
+    # Defense-in-depth: even if the manifest filter missed (or the LLM
+    # invented a tool name), refuse to dispatch a call whose MCP-function
+    # name is in the connector's deny list. The manifest filter is the
+    # primary control; this is a second-chance guard.
+    db_tool = db.query(Tool).filter(Tool.id == tool_info["id"]).first()
+    if db_tool and tool_name in set(db_tool.disabled_tools or []):
+        return {
+            "status": "blocked",
+            "content_string": f"Tool '{tool_name}' is disabled in the {db_tool.name} connector.",
+            "raw_result": {"error_class": "tool_blocked", "tool_name": tool_name, "connector": db_tool.name},
+        }
 
     try:
         # Execute the tool based on its type

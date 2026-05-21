@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Settings, Play, Trash2, Search } from 'lucide-react';
-import { Tool, ToolCreate } from '../types';
+import { Plus, Settings, Play, Trash2, Search, Layers } from 'lucide-react';
+import { Tool, ToolCreate, ToolCapabilities, DiscoveredMcpTool } from '../types';
 import { apiService } from '../services/api';
 
 const ToolManager: React.FC = () => {
@@ -10,6 +10,12 @@ const ToolManager: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTool, setEditingTool] = useState<Tool | null>(null);
   const [testResults, setTestResults] = useState<Record<number, any>>({});
+  // Per-tool capability browser state. Only one row's panel is open at a time
+  // (toggling another row collapses the first) so the page stays scannable.
+  const [expandedCaps, setExpandedCaps] = useState<number | null>(null);
+  const [capsLoading, setCapsLoading] = useState<Record<number, boolean>>({});
+  const [capsByTool, setCapsByTool] = useState<Record<number, ToolCapabilities | null>>({});
+  const [capsError, setCapsError] = useState<Record<number, string>>({});
 
   const [newTool, setNewTool] = useState<ToolCreate>({
     name: '',
@@ -86,9 +92,63 @@ const ToolManager: React.FC = () => {
     try {
       const result = await apiService.testTool(toolId, { test: true });
       setTestResults(prev => ({ ...prev, [toolId]: result }));
+      // A successful test rediscovers capabilities, so invalidate any cached
+      // panel data — next open will refetch the new tools list.
+      setCapsByTool(prev => ({ ...prev, [toolId]: null }));
     } catch (error) {
       console.error('Failed to test tool:', error);
       setTestResults(prev => ({ ...prev, [toolId]: { error: 'Test failed' } }));
+    }
+  };
+
+  const loadCapabilities = async (toolId: number) => {
+    setCapsLoading(prev => ({ ...prev, [toolId]: true }));
+    setCapsError(prev => ({ ...prev, [toolId]: '' }));
+    try {
+      const caps = await apiService.getToolCapabilities(toolId);
+      setCapsByTool(prev => ({ ...prev, [toolId]: caps }));
+    } catch (e: any) {
+      setCapsError(prev => ({ ...prev, [toolId]: String(e?.message || e) }));
+    } finally {
+      setCapsLoading(prev => ({ ...prev, [toolId]: false }));
+    }
+  };
+
+  const toggleCapabilities = async (tool: Tool) => {
+    if (expandedCaps === tool.id) {
+      setExpandedCaps(null);
+      return;
+    }
+    setExpandedCaps(tool.id);
+    if (!capsByTool[tool.id]) {
+      await loadCapabilities(tool.id);
+    }
+  };
+
+  /** Flip one MCP tool's enabled/disabled state and PATCH the server. The
+   * panel renders optimistically so the checkbox feels instant; on error
+   * we reload the canonical state from the server. */
+  const handleToggleDiscoveredTool = async (toolId: number, mcpName: string, nextDisabled: boolean) => {
+    const caps = capsByTool[toolId];
+    if (!caps) return;
+    const current = new Set(caps.disabled_tools || []);
+    if (nextDisabled) current.add(mcpName); else current.delete(mcpName);
+    const nextList = Array.from(current);
+    // Optimistic update.
+    setCapsByTool(prev => ({
+      ...prev,
+      [toolId]: {
+        ...caps,
+        disabled_tools: nextList,
+        tools: caps.tools.map(t => t.name === mcpName ? { ...t, disabled: nextDisabled } : t),
+      },
+    }));
+    try {
+      await apiService.updateDisabledTools(toolId, nextList);
+    } catch (e: any) {
+      setCapsError(prev => ({ ...prev, [toolId]: `Failed to save: ${String(e?.message || e)}` }));
+      // Re-pull canonical state so the UI doesn't drift from the backend.
+      await loadCapabilities(toolId);
     }
   };
 
@@ -215,6 +275,15 @@ const ToolManager: React.FC = () => {
                   )}
                 </div>
                 <div className="flex items-center space-x-2">
+                  {tool.type === 'mcp' && (
+                    <button
+                      onClick={() => toggleCapabilities(tool)}
+                      className={`p-2 ${expandedCaps === tool.id ? 'text-primary-600' : 'text-gray-400 hover:text-gray-600'}`}
+                      title="Capabilities / per-tool allow list"
+                    >
+                      <Layers className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => handleTestTool(tool.id)}
                     className="p-2 text-gray-400 hover:text-gray-600"
@@ -320,6 +389,19 @@ const ToolManager: React.FC = () => {
                   </pre>
                 </div>
               )}
+
+              {/* Capability browser — only meaningful for MCP servers, and
+                  only after a successful test/discovery. */}
+              {expandedCaps === tool.id && tool.type === 'mcp' && (
+                <CapabilityPanel
+                  toolId={tool.id}
+                  loading={!!capsLoading[tool.id]}
+                  error={capsError[tool.id]}
+                  caps={capsByTool[tool.id]}
+                  onToggleTool={(name, disabled) => handleToggleDiscoveredTool(tool.id, name, disabled)}
+                  onRefresh={() => loadCapabilities(tool.id)}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -328,6 +410,94 @@ const ToolManager: React.FC = () => {
       {filteredTools.length === 0 && !isLoading && (
         <div className="text-center py-8">
           <p className="text-gray-500">No tools found</p>
+        </div>
+      )}
+    </div>
+  );
+};
+
+interface CapabilityPanelProps {
+  toolId: number;
+  loading: boolean;
+  error?: string;
+  caps: ToolCapabilities | null | undefined;
+  onToggleTool: (mcpName: string, nextDisabled: boolean) => void;
+  onRefresh: () => void;
+}
+
+const CapabilityPanel: React.FC<CapabilityPanelProps> = ({ loading, error, caps, onToggleTool, onRefresh }) => {
+  if (loading) {
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-500">
+        Loading capabilities…
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <div className="mt-4 pt-4 border-t border-gray-200 text-sm text-red-600">
+        {error}
+      </div>
+    );
+  }
+  if (!caps) return null;
+  const discovered: DiscoveredMcpTool[] = caps.tools || [];
+  const enabledCount = discovered.filter(t => !t.disabled).length;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-gray-200">
+      <div className="flex items-center justify-between mb-2">
+        <div>
+          <h4 className="text-sm font-medium text-gray-900">Capabilities</h4>
+          <p className="text-xs text-gray-500 mt-0.5">
+            {discovered.length > 0
+              ? `${enabledCount}/${discovered.length} tools exposed to the agent. Uncheck to hide one from the LLM.`
+              : caps.message || 'No tools discovered yet — click the play button to run discovery.'}
+          </p>
+        </div>
+        <button
+          onClick={onRefresh}
+          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50"
+          title="Refresh capability list"
+        >
+          Refresh
+        </button>
+      </div>
+
+      {discovered.length > 0 && (
+        <div className="space-y-1.5 max-h-64 overflow-y-auto pr-1">
+          {discovered.map(t => (
+            <label
+              key={t.name}
+              className={`flex items-start space-x-2 p-2 rounded border ${
+                t.disabled ? 'bg-gray-50 border-gray-200' : 'bg-white border-gray-200'
+              } hover:bg-gray-50 cursor-pointer`}
+            >
+              <input
+                type="checkbox"
+                checked={!t.disabled}
+                onChange={(e) => onToggleTool(t.name, !e.target.checked)}
+                className="mt-0.5 h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+              />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center space-x-2">
+                  <code className={`text-xs font-mono ${t.disabled ? 'text-gray-400 line-through' : 'text-gray-800'}`}>
+                    {t.name}
+                  </code>
+                  {t.disabled && (
+                    <span className="px-1.5 py-0.5 text-[10px] uppercase tracking-wide bg-red-100 text-red-700 rounded">
+                      blocked
+                    </span>
+                  )}
+                </div>
+                {t.description && (
+                  <p className={`text-xs mt-0.5 ${t.disabled ? 'text-gray-400' : 'text-gray-600'}`}>
+                    {t.description}
+                  </p>
+                )}
+              </div>
+            </label>
+          ))}
         </div>
       )}
     </div>

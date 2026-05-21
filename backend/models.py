@@ -97,6 +97,11 @@ class Tool(Base):
     endpoint = Column(String)
     enabled = Column(Boolean, default=True)
     config_json = Column(JSON, default={})
+    # Names of individual MCP tools to hide from the agent — populated from
+    # the capability browser. Server stays enabled; only listed tools are
+    # filtered out of openai_tools_manifest. Empty list = expose everything
+    # the server advertises.
+    disabled_tools = Column(JSON, default=list)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

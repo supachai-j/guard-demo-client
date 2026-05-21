@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from .. import auth as _auth
 from ..database import get_db
 from ..models import AppConfig, Tool
-from ..schemas import ToolCreate, ToolResponse, ToolUpdate
+from ..schemas import DisabledToolsUpdate, ToolCreate, ToolResponse, ToolUpdate
 from ..toolhive import discover_mcp_tool_capabilities_sync, store_capabilities
 
 router = APIRouter(prefix="/api/tools", tags=["tools"])
@@ -115,7 +115,15 @@ async def test_tool(tool_id: int, db: Session = Depends(get_db)):
 
 @router.get("/{tool_id}/capabilities")
 async def get_tool_capabilities(tool_id: int, db: Session = Depends(get_db)):
-    """Get stored capabilities for an MCP tool"""
+    """Return stored capabilities for an MCP connector + the operator's deny list.
+
+    The Connectors UI uses this to render per-tool toggles. We dig the
+    discovered tool list out of the nested JSON-RPC envelope and surface
+    it flat as `tools: [{name, description}, ...]` so the frontend doesn't
+    have to know the discovery_results schema. `disabled_tools` carries
+    the current deny list so checkbox state can render without a second
+    fetch.
+    """
     from ..toolhive import get_stored_capabilities
 
     tool = db.query(Tool).filter(Tool.id == tool_id).first()
@@ -126,12 +134,65 @@ async def get_tool_capabilities(tool_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Only MCP tools have capabilities")
 
     capabilities = await get_stored_capabilities(tool_id, db)
-    if capabilities:
-        return {"tool_id": tool_id, "tool_name": tool.name, "capabilities": capabilities}
-    else:
+    disabled = list(tool.disabled_tools or [])
+    if not capabilities:
         return {
             "tool_id": tool_id,
             "tool_name": tool.name,
             "capabilities": None,
+            "tools": [],
+            "disabled_tools": disabled,
             "message": "No capabilities discovered yet. Run the test endpoint first.",
         }
+
+    discovery = capabilities.get("discovery_results") or {}
+    raw_tools = (
+        discovery.get("tools_list_params_0", {})
+        .get("response", {})
+        .get("result", {})
+        .get("tools", [])
+    )
+    tools_flat = [
+        {
+            "name": t.get("name", ""),
+            "description": (t.get("description") or "")[:512],
+            "disabled": t.get("name", "") in set(disabled),
+        }
+        for t in raw_tools
+        if t.get("name")
+    ]
+    return {
+        "tool_id": tool_id,
+        "tool_name": tool.name,
+        "capabilities": capabilities,
+        "tools": tools_flat,
+        "disabled_tools": disabled,
+    }
+
+
+@router.patch("/{tool_id}/disabled-tools", dependencies=[Depends(_auth.require_admin)])
+async def update_disabled_tools(tool_id: int, body: DisabledToolsUpdate, db: Session = Depends(get_db)):
+    """Replace the per-tool deny list for an MCP connector.
+
+    Body: `{disabled: ["search_web", "send_email"]}` — names listed here
+    are hidden from the LLM's tool manifest entirely (and refused at the
+    execute() boundary as defense-in-depth).
+    """
+    tool = db.query(Tool).filter(Tool.id == tool_id).first()
+    if not tool:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    if tool.type != "mcp":
+        raise HTTPException(status_code=400, detail="Only MCP tools have a disabled-tools list")
+
+    # De-duplicate while preserving order so the audit trail of which name
+    # was added first survives a round-trip.
+    seen: set = set()
+    cleaned: List[str] = []
+    for name in body.disabled:
+        if name and name not in seen:
+            seen.add(name)
+            cleaned.append(name)
+    tool.disabled_tools = cleaned
+    db.commit()
+    db.refresh(tool)
+    return {"tool_id": tool_id, "disabled_tools": cleaned}

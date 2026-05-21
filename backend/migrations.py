@@ -111,6 +111,13 @@ _MIGRATIONS = [
     # ThaiLLM gateway — OpenAI-compatible custom endpoint at thaillm.or.th/api.
     Migration("app_config", "thaillm_api_key", "VARCHAR"),
     Migration("app_config", "thaillm_base_url", "VARCHAR"),
+    # Per-tool allow/deny inside an MCP connector. JSON list of MCP tool
+    # names that should be hidden from the agent's tool manifest. Default '[]'
+    # so existing installs keep exposing every discovered tool.
+    Migration(
+        "tools", "disabled_tools", "TEXT",
+        backfill="UPDATE tools SET disabled_tools = '[]' WHERE disabled_tools IS NULL",
+    ),
 ]
 
 
