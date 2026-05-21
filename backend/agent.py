@@ -44,6 +44,8 @@ class AgentResult(BaseModel):
     tool_traces: List[Dict[str, Any]] = []
     lakera_status: Optional[Dict[str, Any]] = None
     conversation_id: Optional[int] = None
+    # Text OCR'd from any attached images (for Playground / transparency).
+    ocr_texts: List[str] = []
 
 
 def _load_conversation_history(db: Session, conversation_id: Optional[int], limit: int = 10) -> List[Dict[str, Any]]:
@@ -132,6 +134,7 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
     # image is caught before the prompt reaches the LLM. Text-only guardrails
     # can't read images; this is the SI OCR stage in front of them.
     guard_input_text = req.message
+    ocr_texts: List[str] = []
     if req.images and cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
         from . import ocr
         for _img in req.images:
@@ -140,6 +143,7 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
             except Exception:  # noqa: BLE001
                 _txt = ""
             if _txt:
+                ocr_texts.append(_txt)
                 guard_input_text = f"{guard_input_text}\n{_txt}".strip() if guard_input_text else _txt
 
     if cfg.lakera_enabled and active_guardrail and not use_litellm_guardrails:
@@ -186,6 +190,7 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
                     tool_traces=[],
                     lakera_status=lakera_result,
                     conversation_id=conv.id if conv else None,
+                    ocr_texts=ocr_texts,
                 )
             else:
                 print(f"📝 User input flagged by {provider_name} but allowed through (monitor mode)")
@@ -424,6 +429,7 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
             tool_traces=tool_traces,
             lakera_status=lakera_status,
             conversation_id=conv.id if conv else None,
+            ocr_texts=ocr_texts,
         )
 
     except llm_client.LiteLLMGuardrailError as e:

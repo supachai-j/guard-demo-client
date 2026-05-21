@@ -377,3 +377,48 @@ async def moderate_image(payload: dict, db: Session = Depends(get_db)):
         }
     status = await provider.check_image(image_data_url, config)
     return {"supported": True, "provider": pid, "status": status}
+
+
+@router.post("/api/playground/run", dependencies=[Depends(_auth.require_admin)])
+async def playground_run(payload: dict, db: Session = Depends(get_db)):
+    """Interactive single-shot bench: run one prompt (+ optional images) through
+    a chosen LLM model + guardrail provider, without mutating the saved config
+    or polluting conversation history / audit log.
+
+    Body: { message, images?: [base64], model?, guardrail_provider?, guardrail_enabled?: bool }
+    Returns: { response, lakera, ocr_texts, model, guardrail_provider, guardrail_enabled }
+    """
+    from ..agent import AgentRequest, run_agent
+
+    config = db.query(AppConfig).first()
+    if not config:
+        raise HTTPException(status_code=500, detail="No configuration found")
+
+    message = (payload or {}).get("message") or ""
+    images = (payload or {}).get("images") or None
+    if not message.strip() and not images:
+        raise HTTPException(status_code=400, detail="message or images required")
+
+    model = (payload or {}).get("model") or config.openai_model
+    guardrail = (payload or {}).get("guardrail_provider") or getattr(config, "guardrail_provider", None)
+    guardrail_enabled = bool((payload or {}).get("guardrail_enabled", True))
+
+    overrides: Dict[str, Any] = {
+        "openai_model": model,
+        "lakera_enabled": guardrail_enabled,
+    }
+    if guardrail:
+        overrides["guardrail_provider"] = guardrail
+    cfg = _ConfigOverride(config, **overrides)
+
+    req = AgentRequest(message=message, images=images)
+    result = await run_agent(req, cfg, db, persist=False)
+
+    return {
+        "response": result.response,
+        "lakera": result.lakera_status,
+        "ocr_texts": result.ocr_texts,
+        "model": model,
+        "guardrail_provider": guardrail if guardrail_enabled else None,
+        "guardrail_enabled": guardrail_enabled,
+    }

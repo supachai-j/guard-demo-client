@@ -10,11 +10,12 @@ import RagManagement, { RagManagementRef } from '../components/RagManagement';
 import DemoPromptManager from '../components/DemoPromptManager';
 import UIToggles from '../components/UIToggles';
 import ThreatLab from '../components/ThreatLab';
+import Playground from '../components/Playground';
 import { useUI } from '../i18n/UIContext';
 import { useAuth } from '../auth/AuthContext';
 import { LogOut } from 'lucide-react';
 
-type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'providers' | 'prompts' | 'threat-lab' | 'export';
+type TabType = 'setup' | 'branding' | 'llm' | 'rag' | 'rag-scanning' | 'tools' | 'security' | 'providers' | 'prompts' | 'threat-lab' | 'playground' | 'export';
 
 const AdminConsole: React.FC = () => {
   const { t } = useUI();
@@ -401,6 +402,7 @@ const AdminConsole: React.FC = () => {
     { id: 'providers', label: 'Providers' },
     { id: 'prompts', label: t('tabPrompts') },
     { id: 'threat-lab', label: 'Threat Lab' },
+    { id: 'playground', label: 'Playground' },
     { id: 'export', label: t('tabExport') },
   ];
 
@@ -1081,7 +1083,7 @@ const AdminConsole: React.FC = () => {
 
           {activeTab === 'tools' && (
             <div className="space-y-6">
-              <h2 className="text-lg font-semibold text-gray-900">Tool Management</h2>
+              <h2 className="text-lg font-semibold text-gray-900">MCP Connector Management</h2>
               <ToolManager />
             </div>
           )}
@@ -1235,6 +1237,12 @@ const AdminConsole: React.FC = () => {
                 and replayable recordings.
               </p>
               <ThreatLab />
+            </div>
+          )}
+
+          {activeTab === 'playground' && (
+            <div className="space-y-6">
+              <Playground />
             </div>
           )}
 

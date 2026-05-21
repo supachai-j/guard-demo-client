@@ -386,6 +386,10 @@ class ApiService {
     return this.request(`/playbooks/${encodeURIComponent(id)}/run`, { method: 'POST' });
   }
 
+  async playgroundRun(body: { message: string; images?: string[]; model?: string; guardrail_provider?: string; guardrail_enabled?: boolean }): Promise<any> {
+    return this.request('/playground/run', { method: 'POST', body: JSON.stringify(body) });
+  }
+
   async createPlaybook(payload: { name: string; description?: string; prompts: any[] }): Promise<any> {
     return this.request('/playbooks', {
       method: 'POST',
