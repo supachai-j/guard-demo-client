@@ -111,8 +111,9 @@ async def extract_text_from_image(image_b64: str, cfg: Any) -> str:
 def ocr_backend_name() -> str:
     """Which backend will be used (for surfacing in run metadata / UI)."""
     try:
-        import pytesseract  # type: ignore  # noqa: F401
         import shutil
+
+        import pytesseract  # type: ignore  # noqa: F401
         if shutil.which("tesseract"):
             return "tesseract"
     except ImportError:

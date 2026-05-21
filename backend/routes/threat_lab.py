@@ -381,11 +381,13 @@ async def moderate_image(payload: dict, db: Session = Depends(get_db)):
 
 @router.post("/api/playground/run", dependencies=[Depends(_auth.require_admin)])
 async def playground_run(payload: dict, db: Session = Depends(get_db)):
-    """Interactive single-shot bench: run one prompt (+ optional images) through
-    a chosen LLM model + guardrail provider, without mutating the saved config
-    or polluting conversation history / audit log.
+    """Interactive bench: run one prompt (+ optional images) through a chosen
+    LLM model + guardrail provider, without mutating the saved config or
+    polluting conversation history / audit log. Supports multi-turn chat via
+    a client-supplied `history` (the caller owns it; nothing is persisted).
 
-    Body: { message, images?: [base64], model?, guardrail_provider?, guardrail_enabled?: bool }
+    Body: { message, images?: [base64], model?, guardrail_provider?,
+            guardrail_enabled?: bool, history?: [{role, content}] }
     Returns: { response, lakera, ocr_texts, model, guardrail_provider, guardrail_enabled }
     """
     from ..agent import AgentRequest, run_agent
@@ -396,6 +398,7 @@ async def playground_run(payload: dict, db: Session = Depends(get_db)):
 
     message = (payload or {}).get("message") or ""
     images = (payload or {}).get("images") or None
+    history = (payload or {}).get("history") or None
     if not message.strip() and not images:
         raise HTTPException(status_code=400, detail="message or images required")
 
@@ -411,7 +414,7 @@ async def playground_run(payload: dict, db: Session = Depends(get_db)):
         overrides["guardrail_provider"] = guardrail
     cfg = _ConfigOverride(config, **overrides)
 
-    req = AgentRequest(message=message, images=images)
+    req = AgentRequest(message=message, images=images, history=history)
     result = await run_agent(req, cfg, db, persist=False)
 
     return {

@@ -17,6 +17,11 @@ class AgentRequest(BaseModel):
     # Base64 data URLs (data:image/png;base64,...) for vision-capable models.
     # Guardrails scan the text `message` only; images pass through to the LLM.
     images: Optional[List[str]] = None
+    # Client-supplied prior turns ([{role, content}, ...]) for stateless
+    # multi-turn chat (Playground). Used only when persist=False — the caller
+    # owns the history instead of the DB, so nothing is saved. Ignored when
+    # persist=True, where history comes from the Conversation row instead.
+    history: Optional[List[Dict[str, Any]]] = None
 
 
 def _user_content(message: str, images: Optional[List[str]]):
@@ -120,12 +125,28 @@ async def run_agent(req: AgentRequest, cfg: AppConfig, db: Session, *, persist: 
         else None
     )
 
-    # Multi-turn memory: ensure a Conversation row and load prior turns.
+    # Multi-turn memory: when persisting, history comes from the Conversation
+    # row. When not persisting (Playground), the client owns the history and
+    # passes prior turns inline so nothing touches the DB.
     conv = None
     history: List[Dict[str, Any]] = []
     if persist:
         conv = _ensure_conversation(db, req.conversation_id, req.session_id, req.message)
         history = _load_conversation_history(db, conv.id)
+    elif req.history:
+        # Keep only well-formed {role, content} text turns. Blank content is
+        # dropped: Anthropic rejects empty text blocks ("text content blocks
+        # must be non-empty"), which an image-only prior turn would otherwise
+        # produce. The client sends an "[image]" placeholder for those, but we
+        # guard here too so a malformed history can't crash the LLM call.
+        history = [
+            {"role": h["role"], "content": h["content"]}
+            for h in req.history
+            if isinstance(h, dict)
+            and h.get("role") in ("user", "assistant")
+            and isinstance(h.get("content"), str)
+            and h["content"].strip()
+        ]
 
     active_llm_pid = llm_provider_id(cfg)
 
