@@ -386,6 +386,10 @@ class ApiService {
     return this.request(`/playbooks/${encodeURIComponent(id)}/run`, { method: 'POST' });
   }
 
+  exportPlaybookCsvUrl(id: string): string {
+    return `${API_BASE}/playbooks/${encodeURIComponent(id)}/export?format=csv`;
+  }
+
   async playgroundRun(body: { message: string; images?: string[]; model?: string; guardrail_provider?: string; guardrail_enabled?: boolean; history?: Array<{ role: 'user' | 'assistant'; content: string }> }): Promise<any> {
     return this.request('/playground/run', { method: 'POST', body: JSON.stringify(body) });
   }

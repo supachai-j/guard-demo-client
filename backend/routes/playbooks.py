@@ -4,10 +4,14 @@ in the playbooks table. Built-ins live in backend/playbooks.py and
 are merged in for GET; PUT/DELETE on a built-in id returns 403."""
 
 import asyncio
+import csv
+import io
 import re
+from datetime import datetime
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import auth as _auth
@@ -86,6 +90,47 @@ async def get_playbook(playbook_id: str, db: Session = Depends(get_db)):
     if not pb:
         raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
     return pb
+
+
+@router.get("/{playbook_id}/export")
+async def export_playbook(
+    playbook_id: str,
+    format: str = Query("csv", description="Export format — currently only 'csv'."),
+    db: Session = Depends(get_db),
+):
+    """Export a playbook's prompts as a downloadable file.
+
+    `has_image` is emitted as a boolean rather than the base64 payload —
+    full images would blow the CSV up, and the column is meant to flag
+    image-injection rows for a human reading the export."""
+    pb = _resolve_playbook(db, playbook_id)
+    if not pb:
+        raise HTTPException(status_code=404, detail=f"Playbook '{playbook_id}' not found")
+    if format != "csv":
+        raise HTTPException(status_code=400, detail="format must be 'csv'")
+
+    fieldnames = ["id", "category", "prompt", "expected", "has_image", "description"]
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for p in pb.get("prompts") or []:
+        writer.writerow({
+            "id": p.get("id"),
+            "category": p.get("category"),
+            "prompt": p.get("prompt"),
+            "expected": p.get("expected"),
+            "has_image": "true" if p.get("image_b64") else "false",
+            "description": p.get("description") or "",
+        })
+
+    timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    safe_slug = re.sub(r"[^A-Za-z0-9_.-]+", "_", playbook_id) or "playbook"
+    filename = f"playbook_{safe_slug}_{timestamp}.csv"
+    return StreamingResponse(
+        io.BytesIO(buf.getvalue().encode("utf-8")),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.post("", dependencies=[Depends(_auth.require_admin)])

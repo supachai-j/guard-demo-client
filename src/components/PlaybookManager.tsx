@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Plus, Trash2, Edit3, X, Save, Lock, Copy, ImagePlus } from 'lucide-react';
+import { Plus, Trash2, Edit3, X, Save, Lock, Copy, ImagePlus, Download } from 'lucide-react';
 import { apiService } from '../services/api';
 
 type CatalogEntry = {
@@ -289,6 +289,13 @@ const PlaybookManager: React.FC<Props> = ({ open, onClose, onChanged }) => {
                           )}
                         </td>
                         <td className="p-2 text-right">
+                          <a
+                            href={apiService.exportPlaybookCsvUrl(p.id)}
+                            title="Export prompts as CSV"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs bg-gray-100 dark:bg-slate-700 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-600 mr-1"
+                          >
+                            <Download className="w-3 h-3" /> CSV
+                          </a>
                           <button
                             onClick={() => duplicate(p.id)}
                             title="Duplicate"
