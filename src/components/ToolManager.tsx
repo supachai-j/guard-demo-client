@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Settings, Play, Trash2, Search, Layers } from 'lucide-react';
+import { Plus, Settings, Play, Trash2, Search, Layers, Network } from 'lucide-react';
 import { Tool, ToolCreate, ToolCapabilities, DiscoveredMcpTool } from '../types';
 import { apiService } from '../services/api';
 
@@ -10,6 +10,9 @@ const ToolManager: React.FC = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingTool, setEditingTool] = useState<Tool | null>(null);
   const [testResults, setTestResults] = useState<Record<number, any>>({});
+  // Write-only gateway key input — separate from editingTool because the
+  // stored key is never returned (we only know whether one is set).
+  const [gatewayKeyInput, setGatewayKeyInput] = useState('');
   // Per-tool capability browser state. Only one row's panel is open at a time
   // (toggling another row collapses the first) so the page stays scannable.
   const [expandedCaps, setExpandedCaps] = useState<number | null>(null);
@@ -69,7 +72,13 @@ const ToolManager: React.FC = () => {
         type: tool.type,
         enabled: tool.enabled,
         config_json: tool.config_json,
+        gateway_enabled: tool.gateway_enabled,
+        gateway_url: tool.gateway_url,
+        // Only send the key when the operator typed a new one; blank preserves
+        // the stored secret (write-only on the backend).
+        ...(gatewayKeyInput.trim() ? { gateway_api_key: gatewayKeyInput } : {}),
       });
+      setGatewayKeyInput('');
       setEditingTool(null);
       await loadTools();
     } catch (error) {
@@ -266,6 +275,17 @@ const ToolManager: React.FC = () => {
                     <span className="px-2 py-1 text-xs bg-blue-100 text-blue-800 rounded-full">
                       {tool.type.toUpperCase()}
                     </span>
+                    {tool.type === 'mcp' && (
+                      tool.gateway_enabled && tool.gateway_url ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-purple-100 text-purple-800 rounded-full" title={`Routed through AI Gateway: ${tool.gateway_url}`}>
+                          <Network className="w-3 h-3" /> via AI Gateway
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded-full" title="Connects directly to the MCP endpoint">
+                          direct
+                        </span>
+                      )
+                    )}
                   </div>
                   {tool.description && (
                     <p className="text-sm text-gray-600 mt-1">{tool.description}</p>
@@ -292,7 +312,7 @@ const ToolManager: React.FC = () => {
                     <Play className="w-4 h-4" />
                   </button>
                   <button
-                    onClick={() => setEditingTool(editingTool?.id === tool.id ? null : tool)}
+                    onClick={() => { setGatewayKeyInput(''); setEditingTool(editingTool?.id === tool.id ? null : tool); }}
                     className="p-2 text-gray-400 hover:text-gray-600"
                     title="Edit Tool"
                   >
@@ -363,9 +383,57 @@ const ToolManager: React.FC = () => {
                       </label>
                     </div>
                   </div>
+
+                  {/* AI Gateway routing — MCP connectors only. When on, the
+                      agent's MCP traffic for this connector routes through the
+                      gateway so it can govern the connection. */}
+                  {editingTool.type === 'mcp' && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 space-y-3">
+                      <div className="flex items-center space-x-3">
+                        <input
+                          type="checkbox"
+                          id={`gw-enabled-${tool.id}`}
+                          checked={!!editingTool.gateway_enabled}
+                          onChange={(e) => setEditingTool({ ...editingTool, gateway_enabled: e.target.checked })}
+                          className="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+                        />
+                        <label htmlFor={`gw-enabled-${tool.id}`} className="text-sm font-medium text-gray-700 flex items-center gap-1.5">
+                          <Network className="w-4 h-4 text-purple-600" /> Route MCP connectivity via AI Gateway
+                        </label>
+                      </div>
+                      {editingTool.gateway_enabled && (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pl-7">
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">Gateway MCP route URL</label>
+                            <input
+                              type="text"
+                              value={editingTool.gateway_url || ''}
+                              onChange={(e) => setEditingTool({ ...editingTool, gateway_url: e.target.value })}
+                              placeholder="https://kong.example.com/mcp/filesystem"
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            />
+                            <p className="text-xs text-gray-500 mt-1">The gateway route that fronts this MCP server. Discovery + tool calls connect here instead of the endpoint above.</p>
+                          </div>
+                          <div className="md:col-span-2">
+                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                              Gateway API key {editingTool.gateway_api_key_set && <span className="text-green-600 font-normal">(key stored — leave blank to keep)</span>}
+                            </label>
+                            <input
+                              type="password"
+                              value={gatewayKeyInput}
+                              onChange={(e) => setGatewayKeyInput(e.target.value)}
+                              placeholder={editingTool.gateway_api_key_set ? '••••••••' : 'sent via the apikey header (Kong key-auth)'}
+                              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="flex justify-end space-x-2 mt-4">
                     <button
-                      onClick={() => setEditingTool(null)}
+                      onClick={() => { setGatewayKeyInput(''); setEditingTool(null); }}
                       className="px-4 py-2 text-gray-700 bg-gray-200 rounded-lg hover:bg-gray-300"
                     >
                       Cancel

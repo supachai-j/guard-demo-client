@@ -8,6 +8,24 @@ from .database import get_db
 from .models import AppConfig, MCPToolCapabilities, Tool
 
 
+def mcp_connect_target(
+    endpoint: Optional[str],
+    gateway_enabled: bool = False,
+    gateway_url: Optional[str] = None,
+    gateway_api_key: Optional[str] = None,
+) -> tuple[Optional[str], Optional[Dict[str, str]]]:
+    """Resolve where to connect for an MCP connector + any auth headers.
+
+    When gateway routing is on, connect to the gateway's MCP route with the
+    key sent via the `apikey` header (Kong-style key-auth) so the AI Gateway
+    governs the connection. Otherwise connect straight to `endpoint`.
+    Returns (url, extra_headers)."""
+    if gateway_enabled and (gateway_url or "").strip():
+        headers = {"apikey": gateway_api_key} if gateway_api_key else None
+        return gateway_url.strip(), headers
+    return endpoint, None
+
+
 def _mcp_error_message(result: Dict[str, Any]) -> str:
     """Extract a single error string from MCP result content (may be list of {type, text})."""
     content = result.get("content", "Unknown error")
@@ -271,7 +289,6 @@ async def execute_mcp_tool(
     """
     try:
         endpoint = tool["endpoint"]
-        print(f"🔧 Executing MCP tool: {tool['name']} at {endpoint}")
 
         from . import llm_client
         from .mcp import build_transport, mcp_call, mcp_initialize, try_list
@@ -286,9 +303,21 @@ async def execute_mcp_tool(
                 "details": "Please configure the LLM API key in the admin interface",
             }
 
+        # Resolve direct vs. AI-gateway-governed routing from the stored Tool row
+        # (tool_metadata only carries id/name/type/endpoint).
+        db_tool = db.query(Tool).filter(Tool.id == tool.get("id")).first()
+        target, extra_headers = mcp_connect_target(
+            endpoint,
+            getattr(db_tool, "gateway_enabled", False),
+            getattr(db_tool, "gateway_url", None),
+            getattr(db_tool, "gateway_api_key", None),
+        )
+        route = "via AI gateway" if (extra_headers is not None or target != endpoint) else "direct"
+        print(f"🔧 Executing MCP tool: {tool['name']} ({route}) at {target}")
+
         # Build the appropriate transport (HTTP or SSE)
-        transport = build_transport(endpoint)
-        print(f"🔧 Built transport for {endpoint}")
+        transport = build_transport(target, extra_headers=extra_headers)
+        print(f"🔧 Built transport for {target}")
 
         try:
             # Initialize MCP connection
@@ -652,14 +681,23 @@ async def discover_mcp_tool_capabilities_sync(
         from datetime import datetime
 
         endpoint = tool["endpoint"]
-        print(f"🔍 Discovering capabilities for {tool['name']} at {endpoint}")
+        # Route discovery the same way calls are routed: direct, or through the
+        # AI gateway (with apikey header) when the connector is gateway-governed.
+        target, extra_headers = mcp_connect_target(
+            endpoint,
+            tool.get("gateway_enabled", False),
+            tool.get("gateway_url"),
+            tool.get("gateway_api_key"),
+        )
+        route = "via AI gateway" if (extra_headers is not None or target != endpoint) else "direct"
+        print(f"🔍 Discovering capabilities for {tool['name']} ({route}) at {target}")
 
         # Use our existing MCP transport functions
         from .mcp import HTTPTransport, SSETransport, build_transport, mcp_initialize, try_list
 
         # Try HTTP first, then autofix to SSE if needed (same as mcp_example.py)
-        transport = build_transport(endpoint)
-        print(f"🔧 Built transport for {endpoint}")
+        transport = build_transport(target, extra_headers=extra_headers)
+        print(f"🔧 Built transport for {target}")
 
         try:
             # Initialize MCP connection
@@ -737,7 +775,7 @@ async def discover_mcp_tool_capabilities_sync(
                     transport.close()
                 except Exception:
                     pass
-                transport = SSETransport(endpoint)
+                transport = SSETransport(target, extra_headers=extra_headers)
 
                 # Retry with SSE transport
                 init_result = mcp_initialize(transport)
@@ -842,7 +880,6 @@ async def execute_mcp_tool_multi_step(
     """
     try:
         endpoint = tool["endpoint"]
-        print(f"🔧 Executing MCP tool (multi-step): {tool['name']} at {endpoint}")
 
         from . import llm_client
         from .mcp import (
@@ -864,9 +901,20 @@ async def execute_mcp_tool_multi_step(
                 "details": "Please configure the LLM API key in the admin interface",
             }
 
+        # Direct vs. AI-gateway-governed routing (same as the single-step path).
+        db_tool = db.query(Tool).filter(Tool.id == tool.get("id")).first()
+        target, extra_headers = mcp_connect_target(
+            endpoint,
+            getattr(db_tool, "gateway_enabled", False),
+            getattr(db_tool, "gateway_url", None),
+            getattr(db_tool, "gateway_api_key", None),
+        )
+        route = "via AI gateway" if (extra_headers is not None or target != endpoint) else "direct"
+        print(f"🔧 Executing MCP tool (multi-step, {route}): {tool['name']} at {target}")
+
         # Build the appropriate transport (HTTP or SSE)
-        transport = build_transport(endpoint)
-        print(f"🔧 Built transport for {endpoint}")
+        transport = build_transport(target, extra_headers=extra_headers)
+        print(f"🔧 Built transport for {target}")
 
         try:
             # Initialize MCP connection
@@ -1020,7 +1068,7 @@ async def execute_mcp_tool_multi_step(
                     transport.close()
                 except Exception:
                     pass
-                transport = SSETransport(endpoint)
+                transport = SSETransport(target, extra_headers=extra_headers)
 
                 # Retry with SSE transport (recursive call)
                 return await execute_mcp_tool_multi_step(

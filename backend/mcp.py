@@ -38,12 +38,13 @@ class HTTPTransport(MCPTransport):
     - Some servers require Accept: 'application/json, text/event-stream' on POST
     """
 
-    def __init__(self, base_url: str, timeout: float = 60.0):
+    def __init__(self, base_url: str, timeout: float = 60.0, extra_headers: Optional[Dict[str, str]] = None):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.session = requests.Session()
         self.session_id: Optional[str] = None
         self._rpc_id = 0
+        self._extra_headers = extra_headers or {}
 
     def _next_id(self) -> str:
         self._rpc_id += 1
@@ -53,6 +54,7 @@ class HTTPTransport(MCPTransport):
         h = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream"}
         if self.session_id:
             h["Mcp-Session-Id"] = self.session_id
+        h.update(self._extra_headers)  # gateway auth (e.g. apikey for Kong key-auth)
         return h
 
     def _post_raw(self, payload: Dict[str, Any]) -> Tuple[requests.Response, str]:
@@ -146,7 +148,7 @@ class SSETransport(MCPTransport):
       - Responses may arrive on SSE OR embedded as an SSE block in POST body
     """
 
-    def __init__(self, sse_url: str, timeout: float = 60.0):
+    def __init__(self, sse_url: str, timeout: float = 60.0, extra_headers: Optional[Dict[str, str]] = None):
         self.base_url = re.sub(r"#.*$", "", sse_url.rstrip("/"))
         self._sse_fragment = (re.search(r"#(.+)$", sse_url) or [None, None])[1]
         # Pass fragment to proxy so it can route to the correct stdio server (e.g. ToolHive SSE proxy).
@@ -164,6 +166,7 @@ class SSETransport(MCPTransport):
         self._rpc_id = 0
         self._stream_stop = threading.Event()
         self._stream_error: Optional[Exception] = None  # reader thread connection error
+        self._extra_headers = extra_headers or {}
 
     def _next_id(self) -> str:
         self._rpc_id += 1
@@ -175,6 +178,7 @@ class SSETransport(MCPTransport):
             h["Mcp-Session-Id"] = self.session_id
         if getattr(self, "_sse_fragment", None):
             h["X-MCP-Server"] = self._sse_fragment
+        h.update(getattr(self, "_extra_headers", {}))  # gateway auth (e.g. apikey)
         return h
 
     def _post_target(self) -> str:
@@ -408,10 +412,13 @@ def probe_transport(url: str) -> str:
     return "http"
 
 
-def build_transport(url: str) -> MCPTransport:
-    """Build appropriate transport for URL"""
+def build_transport(url: str, extra_headers: Optional[Dict[str, str]] = None) -> MCPTransport:
+    """Build appropriate transport for URL. `extra_headers` is merged into every
+    request (used to inject AI-gateway auth, e.g. the apikey header for Kong)."""
     kind = probe_transport(url)
-    return SSETransport(url) if kind == "sse" else HTTPTransport(url)
+    if kind == "sse":
+        return SSETransport(url, extra_headers=extra_headers)
+    return HTTPTransport(url, extra_headers=extra_headers)
 
 
 # =========================================================

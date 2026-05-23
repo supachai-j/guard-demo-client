@@ -198,6 +198,10 @@ export interface Tool {
   enabled: boolean;
   config_json?: any;
   disabled_tools?: string[];
+  // AI Gateway routing for MCP connectivity.
+  gateway_enabled?: boolean;
+  gateway_url?: string;
+  gateway_api_key_set?: boolean; // whether a key is stored (the key itself is never returned)
   created_at: string;
   updated_at: string;
 }
@@ -210,6 +214,9 @@ export interface ToolCreate {
   enabled: boolean;
   config_json?: any;
   disabled_tools?: string[];
+  gateway_enabled?: boolean;
+  gateway_url?: string;
+  gateway_api_key?: string; // write-only
 }
 
 export interface ToolUpdate extends ToolCreate {}

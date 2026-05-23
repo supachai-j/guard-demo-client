@@ -164,6 +164,9 @@ class ToolBase(BaseModel):
     enabled: bool = True
     config_json: Optional[Dict[str, Any]] = None
     disabled_tools: List[str] = []
+    # AI Gateway routing for MCP connectivity (non-secret config; safe to return).
+    gateway_enabled: bool = False
+    gateway_url: Optional[str] = None
 
 
 class DisabledToolsUpdate(BaseModel):
@@ -175,14 +178,20 @@ class ToolResponse(ToolBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    # Whether a gateway key is stored. The key itself is write-only and never
+    # returned (GET /api/tools is unauthenticated), so we expose only a boolean.
+    gateway_api_key_set: bool = False
 
 
 class ToolCreate(ToolBase):
-    pass
+    # Write-only: accepted on create/update, stored, used at connect time,
+    # never echoed back in ToolResponse.
+    gateway_api_key: Optional[str] = None
 
 
 class ToolUpdate(ToolBase):
-    pass
+    # Write-only. Blank/omitted on update preserves the existing stored key.
+    gateway_api_key: Optional[str] = None
 
 
 # Lakera schemas

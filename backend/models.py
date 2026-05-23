@@ -106,8 +106,23 @@ class Tool(Base):
     # filtered out of openai_tools_manifest. Empty list = expose everything
     # the server advertises.
     disabled_tools = Column(JSON, default=list)
+    # AI Gateway routing (Kong-style MCP Gateway). When gateway_enabled, MCP
+    # discovery + tool calls route through gateway_url (the gateway's MCP
+    # route) instead of connecting to `endpoint` directly, with the key sent
+    # via the apikey header for the gateway's key-auth. This puts the gateway
+    # in the path so it can govern the connection (auth, observability, rate
+    # limits). Off = the agent connects straight to `endpoint`.
+    gateway_enabled = Column(Boolean, default=False)
+    gateway_url = Column(String, nullable=True)
+    gateway_api_key = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def gateway_api_key_set(self) -> bool:
+        """Whether a gateway key is stored — surfaced to the UI without ever
+        returning the secret itself."""
+        return bool(self.gateway_api_key)
 
 
 class RagSource(Base):

@@ -42,6 +42,11 @@ async def update_tool(tool_id: int, tool: ToolUpdate, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Tool not found")
 
     for field, value in tool.dict(exclude_unset=True).items():
+        # gateway_api_key is write-only: a blank/omitted value means "keep the
+        # stored key", so the operator can edit other fields without re-typing
+        # the secret (it's never returned to the form to begin with).
+        if field == "gateway_api_key" and not value:
+            continue
         setattr(db_tool, field, value)
 
     db.commit()
@@ -77,7 +82,15 @@ async def test_tool(tool_id: int, db: Session = Depends(get_db)):
         # For MCP tools, try to discover capabilities
         try:
             discovery_result = await discover_mcp_tool_capabilities_sync(
-                {"name": tool.name, "endpoint": tool.endpoint},
+                {
+                    "name": tool.name,
+                    "endpoint": tool.endpoint,
+                    # Route discovery through the AI gateway when this connector
+                    # is gateway-governed (same path the agent uses at call time).
+                    "gateway_enabled": bool(getattr(tool, "gateway_enabled", False)),
+                    "gateway_url": getattr(tool, "gateway_url", None),
+                    "gateway_api_key": getattr(tool, "gateway_api_key", None),
+                },
                 lakera_api_key=lakera_api_key,
                 lakera_project_id=lakera_project_id,
                 lakera_blocking_mode=lakera_blocking_mode,

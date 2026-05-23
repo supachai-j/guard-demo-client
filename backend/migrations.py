@@ -121,6 +121,15 @@ _MIGRATIONS = [
     # Kong AI Gateway — self-hosted OpenAI-compatible AI Proxy route.
     Migration("app_config", "kong_api_key", "VARCHAR"),
     Migration("app_config", "kong_base_url", "VARCHAR"),
+    # Per-connector AI Gateway routing for MCP connectivity. When enabled, the
+    # connector's MCP traffic routes through gateway_url (the gateway governs
+    # the connection) instead of hitting `endpoint` directly.
+    Migration(
+        "tools", "gateway_enabled", "BOOLEAN DEFAULT 0",
+        backfill="UPDATE tools SET gateway_enabled = 0 WHERE gateway_enabled IS NULL",
+    ),
+    Migration("tools", "gateway_url", "VARCHAR"),
+    Migration("tools", "gateway_api_key", "VARCHAR"),
 ]
 
 
