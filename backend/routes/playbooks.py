@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from .. import auth as _auth
+from .. import ocr
 from .. import playbooks as _playbooks
 from ..database import get_db
 from ..models import AppConfig, Playbook, PlaybookRun
@@ -236,9 +237,22 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
 
     async def _scan(item):
         async with sem:
+            # Image-injection (§4.3.14): if the prompt carries an image, OCR
+            # it and fold the extracted text into what the guardrail scans.
+            # Mirrors _scan_one in playbook_runs.py so single-provider runs
+            # get the same mitigation as /multi-provider and /matrix.
+            scan_text = item.get("prompt") or ""
+            ocr_text = None
+            if item.get("image_b64"):
+                try:
+                    ocr_text = await ocr.extract_text_from_image(item["image_b64"], config)
+                except Exception:  # noqa: BLE001
+                    ocr_text = None
+                if ocr_text:
+                    scan_text = f"{scan_text}\n{ocr_text}".strip() if scan_text else ocr_text
             try:
                 status = await provider.check_interaction(
-                    messages=[{"role": "user", "content": item["prompt"]}],
+                    messages=[{"role": "user", "content": scan_text}],
                     cfg=config,
                     meta=None,
                     system_prompt=config.system_prompt,
@@ -253,6 +267,8 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
                     "passed": _verdict(flagged, item.get("expected")),
                     "breakdown": (status or {}).get("breakdown") or [],
                     "status": status,
+                    "has_image": bool(item.get("image_b64")),
+                    "ocr_text": ocr_text,
                 }
             except Exception as e:
                 return {
@@ -265,6 +281,8 @@ async def run_playbook(playbook_id: str, db: Session = Depends(get_db)):
                     # the dashboard instead of silently 100%-passing.
                     "passed": False,
                     "error": str(e),
+                    "has_image": bool(item.get("image_b64")),
+                    "ocr_text": ocr_text,
                 }
 
     results = await asyncio.gather(*[_scan(p) for p in pb["prompts"]])
