@@ -1,0 +1,61 @@
+# Team-facing deploy for guard-demo-client.
+#
+# Two modes, same file:
+#
+#   1. Pull a prebuilt image from GHCR (typical on a VPS where the team
+#      doesn't want the full source). scp this file + a .env to the server:
+#          docker compose pull
+#          docker compose up -d
+#
+#   2. Build locally from source (for dev / when iterating on the fork):
+#          docker compose up -d --build
+#
+# Compose uses `image:` for `pull` and as the tag for any `--build`.
+#
+# State that must survive `docker compose down`:
+#   - data/agentic_demo.db   SQLite: audit log + admin config + provider keys
+#   - data/chroma/           Chroma vector store for the RAG feature
+# Both live under ./data on the host (bind-mounted). Back this directory up
+# the way the team backs up any other DB.
+
+services:
+  app:
+    image: ghcr.io/supachai-j/guard-demo-client:latest
+    # Uncomment for local builds; harmless to leave commented when pulling
+    # from GHCR — Compose only invokes `build:` for `up --build`.
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: guard-demo
+    restart: unless-stopped
+    ports:
+      # Frontend (Vite dev server, with /api proxy → backend). End users
+      # hit this one.
+      - "3000:3000"
+      # Backend API direct. Useful for debugging (curl /api/providers,
+      # /docs Swagger UI). Comment out if you don't want it exposed.
+      - "8000:8000"
+    volumes:
+      # Persist DB + uploaded RAG files across container restarts/rebuilds.
+      # Without this, every `up -d` starts with an empty audit log and a
+      # blank admin config (provider keys, branding, etc. all reset).
+      - ./data:/home/lakeraai/data
+    environment:
+      # Pre-seeding any of these is optional — the Admin UI can set them
+      # at runtime — but baking them in here is convenient for an unattended
+      # VPS deploy. Pulled from a sibling .env file (gitignored).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LAKERA_API_KEY: ${LAKERA_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    healthcheck:
+      # `/health` is the backend's liveness endpoint (see start_all.py).
+      # `curl` is installed in the runtime image (Dockerfile installs it for
+      # the nodesource setup); reusing it avoids adding another dep.
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      # Generous start_period: first boot does `npm install` + `pip install`
+      # inside the container (the image carries the venv but start_all.py
+      # re-checks deps), which can take a couple of minutes on a small VPS.
+      start_period: 180s
