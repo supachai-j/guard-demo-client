@@ -248,7 +248,25 @@ git clone <repository-url>
 cd guard-demo-client
 ```
 
-## 🚀 Quick Start (Recommended)
+## 🐳 Run via Docker (recommended for team deploys)
+
+Fastest path to a running demo on a VPS or shared box — no Python, no
+Node, no local setup. Pulls a prebuilt multi-arch image from GHCR.
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Open http://localhost:3000 (or your server's address on port 3000). State
+(audit log, admin config, RAG vector store) persists in `./data` on the
+host. Upgrade with `docker compose pull && docker compose up -d`.
+
+Full options — single-container `docker run`, building from source,
+pre-seeding API keys via `.env`, ToolHive on `host.docker.internal`,
+image tags and rollback — are in [Docker.md](Docker.md).
+
+## 🚀 Quick Start (Recommended for dev)
 
 ### Fastest Method: Use start_all.py
 

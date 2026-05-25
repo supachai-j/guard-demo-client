@@ -2,6 +2,10 @@
 
 Step-by-step from the README. Do these in order.
 
+> Just want to **run** the demo (no source changes)? See
+> [Docker.md](Docker.md) — `docker compose up -d` and you're done.
+> The instructions below are for **local development**.
+
 ---
 
 ## Prerequisites (install if needed)
@@ -21,7 +25,7 @@ Step-by-step from the README. Do these in order.
 
 2. **Create and activate a virtual environment**
    ```bash
-   cd /Users/teddya/demo-project/guard-demo-client
+   cd /path/to/guard-demo-client
    python3 -m venv venv
    source venv/bin/activate   # Windows: venv\Scripts\activate
    ```
