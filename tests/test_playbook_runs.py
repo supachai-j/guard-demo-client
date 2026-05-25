@@ -21,22 +21,16 @@ Coverage:
 
 from __future__ import annotations
 
-import asyncio
-from types import SimpleNamespace
-from typing import Any, Dict, List, Optional
-
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend import auth as _auth
 from backend import guardrail_provider as _gr_module
 from backend.database import get_db
 from backend.main import app
 from backend.models import AppConfig, Base, Playbook
-
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 # ---------- fixtures -------------------------------------------------------
 

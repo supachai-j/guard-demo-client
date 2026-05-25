@@ -11,15 +11,14 @@ When `app_config.provider_config_locked = True`:
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
-from sqlalchemy.pool import StaticPool
-
 from backend import auth as _auth
 from backend.database import get_db
 from backend.main import app
 from backend.models import AppConfig, Base
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture(scope="function")

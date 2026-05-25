@@ -1,0 +1,9 @@
+# Gitleaks allowlist by commit:path:rule:line fingerprint.
+# Each line documents an intentional fixture that gitleaks' shape-based rules
+# flag as a real secret.
+
+# Fake GCP API key — negative test fixture for the AIGW policy playbook
+# (the demo prompts the LLM to extract / store a secret-looking string so the
+# guardrail's data-exfil detector has something to block).
+# Value: AIzaSyEXAMPLE_FAKE_KEY_FOR_TESTING_ONLY  (clearly synthetic)
+2b3e35187839a16536a02d04aa8b11ac8d32a5ec:scripts/seed_aigw_policy_playbooks.py:gcp-api-key:76
