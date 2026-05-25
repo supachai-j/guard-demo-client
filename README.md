@@ -18,22 +18,35 @@ LLM + guardrail integration, RAG capabilities, and MCP tools.
 - **Admin Console** with selective ZIP export/import (sections: appearance, LLM, security, RAG, demo prompts, tools)
 
 ### Multi-provider integrations
-- **9 LLM providers**: OpenAI, Anthropic, Google (Gemini), Mistral, Groq, Together AI, Ollama (local), self-hosted LiteLLM proxy, Portkey AI Gateway (incl. self-managed)
+- **12 LLM providers**: OpenAI, Anthropic (Claude), Google (Gemini), Mistral, Groq, Together AI, Ollama (local), self-hosted LiteLLM proxy, OpenRouter, ThaiLLM (national Thai LLM gateway), Kong AI Gateway (self-hosted, OpenAI-compatible), Portkey AI Gateway
 - **6 Guardrail providers**: Lakera Guard, OpenAI Moderation, AWS Bedrock Guardrails, Azure AI Content Safety, Palo Alto Prisma AIRS, Cloudflare Firewall for AI
 - Per-provider key slots — switching providers does not require re-entering credentials
 - Catalog-driven UI — dropdowns auto-populate from `/api/providers` and `/api/guardrail-providers`
+- **Dedicated Providers tab** — enable/disable each LLM and guardrail provider, edit keys/base-URL/extra params inline via `EditProviderModal`
+- **Demo-safe provider config lock** — read-only toggle that freezes the entire provider config (keys + enable flags) so demo audiences cannot mutate it from the UI
+
+### Playground (Admin tab — single-shot + multi-turn bench)
+- Pick any model × any guardrail and hold a conversation against the full agent pipeline (pre-guard → RAG → tools → LLM → post-guard)
+- **Image upload + OCR pre-scan** — drop an image, OCR pulls embedded text, the extracted text is fed through the guardrail to catch image-encoded prompt injection (RFP §4.3.14)
+- Each assistant turn shows its own verdict (FLAGGED/clean), per-detector breakdown, and any OCR-extracted text inline
+- Client-held history — nothing persisted to DB / audit / conversation log; clear or refresh to wipe
 
 ### Threat Lab (Admin tab — 9 sub-panels)
 - **Audit log** — every chat/guardrail call captured; CSV + PDF export for compliance demos
 - **Cost** — per-provider token + spend dashboard (USD/M-token pricing table for 8 providers)
 - **Guardrail compare** — fan one prompt to every configured guardrail in parallel, show per-vendor verdict + latency
 - **Compare LLMs** — fan one prompt to N LLM providers in parallel (response + tokens + cost + latency)
-- **OWASP LLM Top 10 (2025) playbook** — 10-prompt suite scored against the active guardrail, aggregate detection rate
+- **Playbook runner & matrix** — run any playbook (OWASP LLM Top 10 2025, AIGW policy suites, custom) against a chosen guardrail set, or run **M playbooks × N providers** in one shot (concurrency throttled to 5 calls/provider). Each run is persisted with history + side-by-side compare across providers and exportable as CSV
 - **Batch eval** — upload CSV of prompts (max 500), get per-prompt verdict matrix
 - **Health** — ping every configured LLM + guardrail, return up/down + latency
 - **Recordings** — capture a sequence of prompts and replay them through the current agent stack
 - **Webhook** — POST to a URL (Slack, PagerDuty, SOAR) on every flagged event; built-in test button
 - Plus from the landing page: **Lakera on vs off compare** modal (works for every guardrail provider) and **image moderation** via `POST /api/moderation/image`
+
+### MCP tool controls (Admin → Tools)
+- ToolHive integration for MCP connectors (HTTP or local servers)
+- **Per-tool allow/deny** — discover each connector's exposed tools, toggle individual tools off without removing the connector (`disabled_tools` list per connector)
+- **Per-connector AI Gateway routing** — route a connector's traffic through a named gateway (e.g. Kong key-auth) with a write-only `gateway_api_key` slot that is never echoed back from the API
 
 ### Admin authentication
 - **JWT-based login** (`POST /api/auth/login`) — 12 h sessions; protect every mutating + sensitive admin endpoint
@@ -362,15 +375,17 @@ Useful scripts:
 
 1. Navigate to http://localhost:3000/admin — you'll be bounced to `/login`
 2. Sign in with `ADMIN_USER` / `ADMIN_PASSWORD` from `.env` (or `admin` / `admin` if you haven't set them yet — login screen will warn you)
-3. Go to the **Security** tab
-4. Pick your **LLM provider** from the dropdown and enter its API key
-   (slots are kept per provider so you can pre-stage several and switch live)
-5. Pick your **Guardrail provider** and enter its credentials
-   (Lakera, OpenAI Moderation, Bedrock, Azure Content Safety, Palo Alto AIRS, Cloudflare Firewall for AI)
+3. Go to the **Providers** tab — this is the single source of truth for keys, base URLs, and which providers are enabled
+   - Enable the LLM provider(s) you want to use and click "Edit" to enter their API key / base URL (slots are kept per provider so you can pre-stage several and switch live)
+   - Enable any Guardrail provider(s) and enter their credentials (Lakera, OpenAI Moderation, Bedrock, Azure Content Safety, Palo Alto AIRS, Cloudflare Firewall for AI)
+   - Optional: toggle **"Provider config locked"** (demo-safe mode) to make the whole tab read-only for the rest of the demo
+4. Go to the **LLM** tab — pick the active model + temperature + system prompt (this tab is settings only; keys live in Providers)
+5. Go to the **Security** tab — pick the active guardrail + mode (Block / Monitor) (this tab is behavior only; guardrail keys live in Providers)
 6. If using LiteLLM proxy + Lakera guardrails, set guardrail names in Admin → Security to match `litellm/config.yaml`:
    - blocking: `lakera-guard-block`
    - monitor: `lakera-guard-monitor`
-7. (Optional) Open the **Threat Lab** tab for the 9-panel suite: audit log + cost dashboard + guardrail compare + LLM compare + OWASP playbook + batch eval + provider health + recordings + webhook config
+7. (Optional) Open the **Threat Lab** tab for the suite: audit log + cost dashboard + guardrail compare + LLM compare + playbook runner + matrix run + run history + batch eval + provider health + recordings + webhook config
+8. (Optional) Open the **Playground** tab for an interactive bench — pick a model × guardrail, attach an image (auto-OCR for image-encoded prompt injection), and hold a multi-turn conversation that runs the full agent pipeline without writing to the audit log
 
 ### 1b. One-click demo personas
 
@@ -476,8 +491,25 @@ valid Bearer token from `POST /api/auth/login`.
 - `GET /api/health/providers` — 🔒 Ping every configured LLM + guardrail, return up/down + latency
 
 ### Playbooks (security suites)
-- `GET /api/playbooks` — Public — Catalog (currently OWASP LLM Top 10 2025)
-- `POST /api/playbooks/{id}/run` — 🔒 Score every prompt through the active guardrail
+- `GET /api/playbooks` — Public — Catalog (OWASP LLM Top 10 2025, AIGW policy playbooks, user-defined)
+- `GET /api/playbooks/{id}` — Public — Single playbook detail
+- `GET /api/playbooks/{id}/export` — Public — Export the playbook's prompts as **CSV**
+- `POST /api/playbooks` — 🔒 Create custom playbook
+- `PUT /api/playbooks/{id}` — 🔒 Update playbook
+- `DELETE /api/playbooks/{id}` — 🔒
+- `POST /api/playbooks/{id}/run` — 🔒 Score every prompt through the selected guardrail(s)
+
+### Playbook runs (history + matrix + compare)
+- `GET /api/playbook-runs` — 🔒 List past runs (filterable by playbook + provider)
+- `POST /api/playbook-runs/multi-provider` — 🔒 Fan one playbook to N providers (concurrency throttled to 5/provider)
+- `POST /api/playbook-runs/matrix` — 🔒 **Matrix run** — M playbooks × N providers in one shot
+- `GET /api/playbook-runs/compare` — 🔒 Side-by-side compare across providers for a given run set
+- `GET /api/playbook-runs/{run_id}` — 🔒 Full per-prompt verdict matrix
+- `PATCH /api/playbook-runs/{run_id}` — 🔒 Edit run metadata (title/notes)
+- `DELETE /api/playbook-runs/{run_id}` — 🔒
+
+### Playground
+- `POST /api/playground/run` — 🔒 Single-turn or multi-turn (client-held history) call through the full agent pipeline with chosen model + guardrail; runs OCR on attached images before guardrail. Does **not** persist to conversations / audit log
 
 ### Batch eval
 - `POST /api/batch/run` — 🔒 Upload CSV of prompts (column `prompt` or one-per-line, max 500); return verdict matrix
@@ -504,9 +536,11 @@ valid Bearer token from `POST /api/auth/login`.
 ### Tools
 - `GET /api/tools` — Public — List tools (used by chat tool manifest)
 - `POST /api/tools` — 🔒 Create tool
-- `PUT /api/tools/{id}` — 🔒 Update tool
+- `PUT /api/tools/{id}` — 🔒 Update tool (incl. per-connector AI Gateway routing — `gateway_id`, write-only `gateway_api_key`)
 - `DELETE /api/tools/{id}` — 🔒 Delete tool
-- `POST /api/tools/test/{id}` — 🔒 Test tool
+- `POST /api/tools/test/{id}` — 🔒 Test tool (rediscovers MCP capabilities)
+- `GET /api/tools/{id}/capabilities` — Public — List the tools/methods this MCP connector exposes, plus any items currently disabled
+- `PATCH /api/tools/{id}/disabled-tools` — 🔒 Update the per-tool allow/deny list on this MCP connector
 
 ### Demo Prompts
 - `GET /api/demo-prompts` — Public — List demo prompts (chat widget reads this)
@@ -521,23 +555,32 @@ valid Bearer token from `POST /api/auth/login`.
 ```
 guard-demo-client/
 ├── backend/                       # FastAPI backend
-│   ├── main.py                    # Routes, inline SQLite migrations
-│   ├── models.py                  # SQLAlchemy: AppConfig, Conversation, Message,
-│   │                              #   AuditLog, SessionRecording, Tool, RagSource, DemoPrompt
+│   ├── main.py                    # App factory, inline SQLite migrations, mounts routes/
+│   ├── routes/                    # Per-domain route modules
+│   │   ├── chat.py                # /api/chat, /chat/stream, /chat/compare-*
+│   │   ├── config.py              # /api/config, export/import ZIP
+│   │   ├── catalogs.py            # /api/providers, /guardrail-providers, /models
+│   │   ├── tools.py               # /api/tools + MCP capabilities + disabled-tools + gateway routing
+│   │   ├── playbooks.py           # /api/playbooks CRUD + run + CSV export
+│   │   ├── playbook_runs.py       # /api/playbook-runs — history, multi-provider, matrix, compare
+│   │   └── threat_lab.py          # /api/batch, /api/health/providers, /api/webhook/test, /api/moderation/image, /api/playground/run
+│   ├── models.py                  # SQLAlchemy: AppConfig, Conversation, Message, AuditLog,
+│   │                              #   SessionRecording, Tool, RagSource, DemoPrompt, Playbook, PlaybookRun
 │   ├── schemas.py                 # Pydantic schemas
 │   ├── database.py                # SQLite engine
-│   ├── agent.py                   # ReAct agent (pre-guard → RAG → tools → LLM → post-guard)
-│   ├── llm_client.py              # LiteLLM dispatch for all 9 providers + SSE streaming
-│   ├── providers.py               # LLM provider catalog (OpenAI/Anthropic/Google/...)
+│   ├── agent.py                   # ReAct agent (pre-guard → OCR → RAG → tools → LLM → post-guard)
+│   ├── ocr.py                     # OCR pre-scan for image-embedded prompt injection (pytesseract → vision-LLM fallback)
+│   ├── llm_client.py              # LiteLLM dispatch for all 12 providers + SSE streaming
+│   ├── providers.py               # LLM provider catalog (OpenAI/Anthropic/.../ThaiLLM/Kong/Portkey)
 │   ├── auth.py                    # JWT login + require_admin dependency
 │   ├── costs.py                   # Per-provider pricing table + cost estimator
 │   ├── webhooks.py                # Outbound webhook on guardrail.flagged events
 │   ├── audit.py                   # Audit log writer + CSV + token/cost capture
-│   ├── playbooks.py               # OWASP LLM Top 10 (2025) suite
+│   ├── playbooks.py               # Built-in suites (OWASP LLM Top 10 2025, AIGW policy)
 │   ├── scenarios.py               # 4 one-click demo company personas
 │   ├── rag.py                     # RAG service, ChromaDB
 │   ├── lakera.py                  # Legacy Lakera REST client + UI state
-│   ├── toolhive.py                # MCP tool execution
+│   ├── toolhive.py                # MCP tool execution + per-connector AI Gateway routing
 │   └── guardrail_provider/        # Unified guardrail abstraction
 │       ├── base.py                # GuardrailProvider ABC + Lakera-shaped status
 │       ├── registry.py            # Catalog + active resolver + UI metadata
@@ -549,29 +592,32 @@ guard-demo-client/
 │       └── cloudflare_provider.py # Workers AI Llama Guard 3 (S1–S14 taxonomy)
 ├── src/                            # React frontend
 │   ├── components/
-│   │   ├── ChatWidget.tsx          # Chat + stream toggle + conversation_id threading
-│   │   ├── ThreatLab.tsx           # Admin tab: 9 sub-panels (audit/cost/compare/.../webhook)
+│   │   ├── ChatWidget.tsx          # Chat + image upload + multimodal + stream toggle + conversation_id threading
+│   │   ├── ThreatLab.tsx           # Admin tab: panels for audit/cost/compare/playbook matrix/run history/.../webhook
+│   │   ├── Playground.tsx          # Admin tab: interactive multi-turn bench (client-held history, runs full agent pipeline)
+│   │   ├── PlaybookManager.tsx     # Playbook CRUD + CSV export
+│   │   ├── ToolManager.tsx         # MCP connectors + per-tool allow/deny + gateway routing
+│   │   ├── EditProviderModal.tsx   # Inline per-provider key/base-URL editor (Providers tab)
 │   │   ├── CompareDialog.tsx       # Active-guardrail-on vs off side-by-side
 │   │   ├── ScenarioSwitcher.tsx    # One-click company logo bar
 │   │   ├── UIToggles.tsx           # EN/TH + Light/Dark switches
 │   │   ├── LakeraOverlay.tsx       # Per-detector verdict panel
 │   │   ├── DemoPromptManager.tsx
-│   │   ├── ToolManager.tsx
 │   │   └── RagManagement.tsx
 │   ├── auth/
 │   │   ├── AuthContext.tsx         # JWT token storage + login/logout helpers
 │   │   └── ProtectedRoute.tsx      # Wraps /admin; redirects to /login when no token
-│   ├── pages/                      # AdminConsole, LandingPage, Login
+│   ├── pages/                      # AdminConsole (12 tabs incl. Providers + Playground), LandingPage, Login
 │   ├── services/api.ts             # Typed REST + SSE iterator + auto Bearer header
-│   ├── i18n/                       # EN/TH dictionaries + UIContext
+│   ├── i18n/                       # EN/TH dictionaries + UIContext + guardrailLabel
 │   └── types/
-├── data/
-│   ├── agentic_demo.db             # SQLite
-│   ├── chroma/                     # ChromaDB vectors (default)
-│   └── chroma_import/              # ChromaDB after import (if used)
-├── fakecompanies/                  # Bundled logos + hero images for scenarios
+├── data/                           # gitignored: SQLite DB + ChromaDB vectors
+├── designdocs/                     # In-repo design notes (incl. MULTI_WORKSPACE_DESIGN.md for Phase 2)
+├── fakecompanies/                  # Bundled logos + hero images + sample exports for scenarios
 ├── litellm/                        # LiteLLM proxy Dockerised config
-├── scripts/                        # stop_demo_stack.sh, fresh_start_demo.sh
+├── scripts/                        # stop_demo_stack.sh, fresh_start_demo.sh, seed_aigw_policy_playbooks.py
+├── tests/                          # pytest suite (providers, playbook_runs, provider_config_lock, ...)
+├── e2e/                            # Playwright smoke tests
 ├── requirements.txt
 ├── package.json
 ├── start_all.py                    # Start backend + frontend + LiteLLM (recommended)
