@@ -1,0 +1,74 @@
+# Keep the Docker build context small and safe. Without this file, `COPY . .`
+# in Dockerfile pulls in venv/ (~2.5GB), node_modules, the SQLite audit log
+# (which may contain real prompts from local testing — possible PII leak into
+# any published image), and a pile of dev-only artifacts.
+
+# --- Dependencies (rebuilt inside the image) ---
+node_modules
+**/node_modules
+venv
+.venv
+env
+ENV
+__pycache__
+**/__pycache__
+*.py[cod]
+*$py.class
+*.egg-info
+
+# --- Build / test output ---
+dist
+build
+test-results
+playwright-report
+.pytest_cache
+.mypy_cache
+.ruff_cache
+coverage
+htmlcov
+.tox
+
+# --- Runtime state (per-deployment, mounted as volume on the server) ---
+# data/ holds agentic_demo.db (audit log) + uploaded RAG files. Baking this
+# into the image would leak local-testing prompts/responses + persist as
+# read-only. The container reads/writes data/ via a host bind mount instead.
+data
+
+# --- Local dev / IDE / OS ---
+.git
+.github
+.gitignore
+.gitattributes
+.gitleaksignore
+.editorconfig
+.vscode
+.idea
+.cursor
+*.swp
+*.swo
+.DS_Store
+._*
+Thumbs.db
+
+# --- Secrets / env (set via runtime env vars, never baked in) ---
+.env
+.env.*
+!.env.example
+
+# --- Tests + dev-only docs not needed at runtime ---
+tests
+e2e
+playwright.config.ts
+designdocs
+Docker.md
+SETUP_INSTRUCTIONS.md
+CHANGELOG.md
+RELEASE_NOTES.md
+pytest.ini
+requirements-dev.txt
+
+# --- Claude / Oracle / agent memory (private; not part of the demo) ---
+ψ
+.claude
+CLAUDE.md
+ONBOARDING.md
