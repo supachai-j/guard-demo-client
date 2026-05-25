@@ -19,7 +19,6 @@ import types
 
 from backend import ocr
 
-
 # ---------- _strip_data_url ------------------------------------------------
 
 class TestStripDataUrl:
