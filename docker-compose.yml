@@ -40,6 +40,14 @@ services:
       # Without this, every `up -d` starts with an empty audit log and a
       # blank admin config (provider keys, branding, etc. all reset).
       - ./data:/home/lakeraai/data
+    extra_hosts:
+      # Make host.docker.internal resolve to the host on Linux too — Docker
+      # Desktop on Mac/Windows provides this automatically, but Linux
+      # `docker compose up` needs the explicit gateway alias or ToolHive
+      # (and any other host-side MCP server) is unreachable from inside the
+      # container. Documented in Docker.md, now wired here so the team
+      # doesn't have to add `--add-host` by hand.
+      - "host.docker.internal:host-gateway"
     environment:
       # Backend port — threaded into the container so start_all.py, the
       # vite proxy, and the healthcheck all agree. Override via .env if
