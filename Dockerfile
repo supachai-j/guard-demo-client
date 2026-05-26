@@ -54,6 +54,13 @@ COPY --from=builder /home/lakeraai /home/lakeraai
 # Copy local files (ensure .dockerignore excludes node_modules or venv)
 COPY . .
 
+EXPOSE 3000
 EXPOSE 8000
+
+# Self-describing image health. Compose may override this with its own
+# healthcheck block; same shape so the two stay consistent. Generous
+# start_period absorbs first-boot npm install + dep verification.
+HEALTHCHECK --interval=30s --timeout=5s --retries=5 --start-period=180s \
+  CMD curl -fsS "http://localhost:${BACKEND_PORT}/health" || exit 1
 
 CMD ["python", "start_all.py"]
