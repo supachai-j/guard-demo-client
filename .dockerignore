@@ -60,6 +60,7 @@ tests
 e2e
 playwright.config.ts
 designdocs
+docs
 Docker.md
 SETUP_INSTRUCTIONS.md
 CHANGELOG.md
