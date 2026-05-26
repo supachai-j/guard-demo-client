@@ -5,10 +5,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv
 
-# Install build dependencies in one layer and clean up
+# Install build dependencies (needed to compile native wheels like
+# chromadb-hnswlib for the runtime venv). `git` is intentionally NOT
+# installed — requirements.txt has no `git+https://` deps; the old
+# upstream-fork clone that needed it was removed.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        git \
         build-essential \
         python3-dev && \
     python -m venv $VIRTUAL_ENV
@@ -18,10 +20,6 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -r requirements.txt
-
-# Clone demo client and remove unnecessary files immediately
-RUN git clone --depth 1 https://github.com/lakeraai/guard-demo-client /home/lakeraai && \
-    rm -rf /home/lakeraai/.git
 
 # -------- Stage 2: Final Image --------
 # Using a single-layer approach for runtime dependencies
@@ -47,11 +45,16 @@ RUN apt-get update && \
     apt-get purge -y --auto-remove gnupg && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy only necessary artifacts from builder
+# Bring the venv over from the builder; the app source comes straight from
+# the build context (next COPY). The old setup also `COPY --from=builder
+# /home/lakeraai` from an upstream `git clone` — that overlay sneaked
+# files past .dockerignore (.github, designdocs, RELEASE_NOTES, etc.),
+# so we dropped it. Verified the resulting image still serves all 12
+# providers.
 COPY --from=builder $VIRTUAL_ENV $VIRTUAL_ENV
-COPY --from=builder /home/lakeraai /home/lakeraai
 
-# Copy local files (ensure .dockerignore excludes node_modules or venv)
+# Copy local files. .dockerignore excludes node_modules, venv, data,
+# tests, docs, etc. — anything not needed at runtime.
 COPY . .
 
 EXPOSE 3000
