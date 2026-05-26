@@ -1,18 +1,21 @@
-"""Tests for backend.playbooks — catalog integrity for OWASP + POC checklist.
+"""Tests for backend.playbooks — catalog integrity for the OWASP built-in.
+
+POC verification integrity tests moved to tests/test_seed_poc_verification_playbook.py
+(it's now a seed script, not a built-in).
 
 These integrity tests guard against the easy regressions:
   - accidentally removing a category from a published taxonomy
   - shipping a prompt without an `expected` outcome (UI scoring breaks)
-  - shipping the POC playbook without enough golden-path coverage
 """
 
 from backend.playbooks import PLAYBOOKS, get_playbook, is_builtin, list_playbooks
 
 # ---------- catalog --------------------------------------------------------
 
-def test_at_least_two_playbooks_shipped():
-    """OWASP Top 10 + POC verification — drop below 2 and the dropdown looks broken."""
-    assert len(PLAYBOOKS) >= 2
+def test_owasp_is_the_built_in():
+    """OWASP Top 10 is the only built-in. Other suites (POC, AIGW policy) seed via scripts/."""
+    assert "owasp_llm_top10_2025" in PLAYBOOKS
+    assert len(PLAYBOOKS) >= 1
 
 
 def test_list_playbooks_shape():
@@ -36,7 +39,8 @@ def test_get_playbook_returns_none_for_unknown():
 
 def test_is_builtin_helper():
     assert is_builtin("owasp_llm_top10_2025") is True
-    assert is_builtin("poc_verification") is True
+    # POC was moved to a seed script — must not register as built-in anymore.
+    assert is_builtin("poc_verification") is False
     assert is_builtin("custom_acme_inc") is False
     assert is_builtin("") is False
 
@@ -93,52 +97,4 @@ def test_owasp_ids_follow_llm_nn_convention():
         assert prompt["id"].startswith("LLM"), f"OWASP id {prompt['id']!r} should start with 'LLM'"
 
 
-# ---------- POC verification playbook --------------------------------------
-
-def test_poc_playbook_present():
-    assert get_playbook("poc_verification") is not None
-
-
-def test_poc_playbook_has_golden_path_section():
-    """Need allowed-prompts to verify the guardrail doesn't over-block."""
-    pb = get_playbook("poc_verification")
-    allowed = [p for p in pb["prompts"] if p["expected"] == "allowed"]
-    assert len(allowed) >= 5, "POC needs at least 5 expected-allowed prompts"
-
-
-def test_poc_playbook_has_blocked_section():
-    pb = get_playbook("poc_verification")
-    blocked = [p for p in pb["prompts"] if p["expected"] == "blocked"]
-    assert len(blocked) >= 10, "POC needs at least 10 expected-blocked prompts"
-
-
-def test_poc_playbook_covers_all_five_categories():
-    """The whole point of the POC checklist is breadth across attack types."""
-    pb = get_playbook("poc_verification")
-    categories = {p["category"] for p in pb["prompts"]}
-    expected = {
-        "Golden path",
-        "PII coverage",
-        "False-positive checks",
-        "Injection variants",
-        "Encoding / evasion",
-    }
-    missing = expected - categories
-    assert not missing, f"POC missing categories: {missing}"
-
-
-def test_poc_pii_section_covers_common_detectors():
-    """Lakera/Bedrock ship ~7-8 PII detectors; we want a prompt per type."""
-    pb = get_playbook("poc_verification")
-    pii_prompts = [p for p in pb["prompts"] if p["category"] == "PII coverage"]
-    assert len(pii_prompts) >= 7, (
-        f"PII section has {len(pii_prompts)} prompts; want ≥7 to cover the detectors"
-    )
-
-
-def test_poc_ids_namespaced():
-    pb = get_playbook("poc_verification")
-    for prompt in pb["prompts"]:
-        assert prompt["id"].startswith("POC-"), (
-            f"POC entry {prompt['id']!r} should start with 'POC-'"
-        )
+# POC integrity tests live in tests/test_seed_poc_verification_playbook.py now.

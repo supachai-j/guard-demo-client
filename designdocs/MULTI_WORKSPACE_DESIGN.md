@@ -159,8 +159,8 @@ For 18-person team, **don't host on ตั้ม's MacBook**. Options:
 
 ## Open Architecture Questions (ตั้มต้อง decide)
 
-1. **Q1 — Built-in playbooks scope**: OWASP + POC built-ins (in code) — visible in every workspace, OR copied to each workspace on creation so they can be customized?
-   - Recommend: **visible in every workspace, read-only**. Users duplicate-to-customize via existing flow.
+1. **Q1 — Built-in playbooks scope**: OWASP is the only in-code built-in; POC and AIGW policy live in `scripts/seed_*.py` (DB-backed once seeded) — visible in every workspace, OR copied to each workspace on creation so they can be customized?
+   - Recommend: **OWASP visible in every workspace, read-only; seeded suites copy per workspace on creation** (so a workspace's POC tweaks don't leak into others). Users duplicate-to-customize via existing flow.
 
 2. **Q2 — Provider keys scope**: Each workspace has its own provider keys (e.g., MMT deal uses Account A's Lakera key; another deal uses Account B). OR: shared globally + per-workspace can override.
    - Recommend: **per-workspace** (clean separation, no key leak between deals).
