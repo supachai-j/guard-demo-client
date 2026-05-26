@@ -30,7 +30,8 @@ FROM python:3.12-slim
 ENV VIRTUAL_ENV=/opt/venv \
     PATH="/opt/venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    NODE_MAJOR=20
+    NODE_MAJOR=20 \
+    BACKEND_PORT=8000
 
 WORKDIR /home/lakeraai
 

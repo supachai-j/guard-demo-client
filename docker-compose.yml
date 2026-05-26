@@ -34,13 +34,17 @@ services:
       - "3000:3000"
       # Backend API direct. Useful for debugging (curl /api/providers,
       # /docs Swagger UI). Comment out if you don't want it exposed.
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:${BACKEND_PORT:-8000}"
     volumes:
       # Persist DB + uploaded RAG files across container restarts/rebuilds.
       # Without this, every `up -d` starts with an empty audit log and a
       # blank admin config (provider keys, branding, etc. all reset).
       - ./data:/home/lakeraai/data
     environment:
+      # Backend port — threaded into the container so start_all.py, the
+      # vite proxy, and the healthcheck all agree. Override via .env if
+      # 8000 collides with another service on the host.
+      BACKEND_PORT: ${BACKEND_PORT:-8000}
       # Pre-seeding any of these is optional — the Admin UI can set them
       # at runtime — but baking them in here is convenient for an unattended
       # VPS deploy. Pulled from a sibling .env file (gitignored).
@@ -51,7 +55,7 @@ services:
       # `/health` is the backend's liveness endpoint (see start_all.py).
       # `curl` is installed in the runtime image (Dockerfile installs it for
       # the nodesource setup); reusing it avoids adding another dep.
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:${BACKEND_PORT:-8000}/health"]
       interval: 30s
       timeout: 5s
       retries: 5

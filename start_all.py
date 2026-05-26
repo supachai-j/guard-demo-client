@@ -14,14 +14,21 @@ import socket
 import urllib.request
 from pathlib import Path
 
+# Backend port — overridable via env so local dev can sidestep a port-8000
+# collision (e.g. another project's uvicorn) without editing source. Compose
+# threads the same env to the healthcheck + frontend proxy so flipping
+# `BACKEND_PORT=8001` moves everything in lockstep.
+_BACKEND_PORT = int(os.environ.get("BACKEND_PORT", "8000"))
+
+
 def print_banner():
     print("=" * 60)
     print("🚀 AGENTIC DEMO - COMPLETE APPLICATION")
     print("=" * 60)
     print("📍 Demo Page: http://localhost:3000")
     print("🔧 Admin Console: http://localhost:3000/admin")
-    print("📚 API Docs: http://localhost:8000/docs")
-    print("🌐 Backend API: http://localhost:8000")
+    print(f"📚 API Docs: http://localhost:{_BACKEND_PORT}/docs")
+    print(f"🌐 Backend API: http://localhost:{_BACKEND_PORT}")
     print("🧠 LiteLLM API: http://localhost:4000")
     print("🛡️ LiteLLM UI: http://localhost:4000/ui")
     print("=" * 60)
@@ -95,7 +102,7 @@ def start_backend():
         uvicorn.run(
             app,
             host="0.0.0.0",
-            port=8000,
+            port=_BACKEND_PORT,
             log_level="info",
             access_log=False  # Disable access logging to prevent blocking I/O
         )
@@ -115,7 +122,7 @@ def is_port_open(host: str, port: int, timeout: float = 0.8) -> bool:
 
 def is_backend_healthy() -> bool:
     try:
-        with urllib.request.urlopen("http://localhost:8000/health", timeout=1.5) as r:
+        with urllib.request.urlopen(f"http://localhost:{_BACKEND_PORT}/health", timeout=1.5) as r:
             return r.status == 200
     except Exception:
         return False
@@ -166,11 +173,11 @@ def main():
 
     backend_started_by_script = False
     backend_thread = None
-    backend_port_in_use = is_port_open("localhost", 8000)
+    backend_port_in_use = is_port_open("localhost", _BACKEND_PORT)
     if backend_port_in_use and is_backend_healthy():
-        print("ℹ️ Backend already running on http://localhost:8000; reusing existing server")
+        print(f"ℹ️ Backend already running on http://localhost:{_BACKEND_PORT}; reusing existing server")
     elif backend_port_in_use:
-        print("❌ Port 8000 is in use by a non-demo process. Free the port and retry.")
+        print(f"❌ Port {_BACKEND_PORT} is in use by a non-demo process. Free the port (or set BACKEND_PORT to something else) and retry.")
         sys.exit(1)
     else:
         backend_thread = threading.Thread(target=start_backend, daemon=True)
