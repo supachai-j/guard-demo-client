@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from .. import audit, llm_client
+from .. import audit, llm_capabilities, llm_client
 from ..agent import AgentRequest, run_agent
 from ..database import get_db
 from ..models import AppConfig, DemoPrompt, Message
@@ -45,6 +45,15 @@ async def chat(request: ChatRequest, db: Session = Depends(get_db)):
                 db.commit()
 
     llm_client.ensure_active_model_valid(config, db)
+
+    # Short-circuit images against known text-only models — the upstream
+    # gateway would otherwise return an opaque "request body must be valid
+    # JSON" error that doesn't tell the operator anything actionable.
+    if request.images and llm_capabilities.is_known_text_only(config.openai_model):
+        raise HTTPException(
+            status_code=400,
+            detail=llm_capabilities.reject_image_request_message(config.openai_model),
+        )
 
     # Create agent request
     agent_request = AgentRequest(
@@ -81,7 +90,18 @@ async def chat_stream(request: ChatRequest, db: Session = Depends(get_db)):
         raise HTTPException(status_code=500, detail="No configuration found")
     llm_client.ensure_active_model_valid(config, db)
 
+    # Short-circuit images against known text-only models. Emitted as an
+    # SSE `error` event (same channel ChatWidget already listens on for
+    # upstream failures) so the UX path is the same — just with a useful
+    # message instead of "OpenAIException - request body must be valid JSON".
+    _reject_msg = None
+    if request.images and llm_capabilities.is_known_text_only(config.openai_model):
+        _reject_msg = llm_capabilities.reject_image_request_message(config.openai_model)
+
     async def event_stream():
+        if _reject_msg:
+            yield f"event: error\ndata: {json.dumps({'message': _reject_msg})}\n\n"
+            return
         start_t = _time.monotonic()
         conv = _ensure_conversation(db, request.conversation_id, request.session_id, request.message)
         history = _load_conversation_history(db, conv.id)
