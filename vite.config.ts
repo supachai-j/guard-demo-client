@@ -11,10 +11,15 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
-    // Tunnels (Tailscale Funnel / Cloudflare Tunnel) hit the dev server with
-    // a non-localhost Host header; vite rejects those by default. Allow the
-    // tailnet domain so `tailscale funnel 3000` works without 403.
-    allowedHosts: ['.ts.net'],
+    // Vite's `allowedHosts` exists to block DNS rebinding attacks against
+    // the dev server. This app is only ever exposed inside trusted
+    // networks (localhost, a private tailnet, or an explicitly-set-up
+    // tunnel) — never on the public internet without an upstream proxy.
+    // `true` lets any Host header through, which means tailnet short names
+    // (e.g. http://agent-smith-02:3000), tailnet FQDNs, Tailscale Funnel,
+    // Cloudflare Tunnel, and `docker compose` deploys all just work
+    // without a per-deploy vite config edit.
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: PROXY_TARGET,
