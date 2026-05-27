@@ -169,6 +169,60 @@ class TestVisionLlmOcr:
         # And the call must be temperature=0 (deterministic transcription).
         assert captured["temperature"] == 0
 
+    def test_uses_resolved_fallback_model_when_active_is_text_only(self, monkeypatch):
+        # The whole point of the resolver. ThaiLLM active + OpenAI key
+        # configured → OCR call must hit gpt-4o-mini (the fallback),
+        # NOT the text-only active model. Without this guarantee the
+        # §4.3.14 image-injection pre-scan silently bypasses.
+        from backend import llm_client
+
+        monkeypatch.setattr(llm_client, "llm_credentials_configured", lambda cfg: True)
+        captured = {}
+
+        def _capture(**kwargs):
+            captured.update(kwargs)
+            return {"choices": [{"message": {"content": "ok"}}]}
+
+        monkeypatch.setattr(llm_client, "chat_completion", _capture)
+
+        cfg = types.SimpleNamespace(
+            openai_model="OpenThaiGPT-ThaiLLM-8B-Instruct-v7.2",
+            ocr_model=None,
+            openai_api_key="sk-fake",
+            google_api_key=None,
+            anthropic_api_key=None,
+            disabled_providers=[],
+        )
+        ocr._vision_llm_ocr_sync("anything", cfg)
+        assert captured["model"] == "gpt-4o-mini"
+
+    def test_returns_empty_when_no_path_resolves(self, monkeypatch):
+        # Active is text-only, no fallback creds. Resolver returns None;
+        # _vision_llm_ocr_sync must NOT call chat_completion at all and
+        # must return "" — preserves the graceful-degrade contract that
+        # callers in agent.py and playbook routes depend on.
+        from backend import llm_client
+
+        monkeypatch.setattr(llm_client, "llm_credentials_configured", lambda cfg: True)
+        called = []
+
+        def _spy(**kwargs):
+            called.append(kwargs)
+            return {"choices": [{"message": {"content": "should not happen"}}]}
+
+        monkeypatch.setattr(llm_client, "chat_completion", _spy)
+
+        cfg = types.SimpleNamespace(
+            openai_model="thaillm-7b",
+            ocr_model=None,
+            openai_api_key=None,
+            google_api_key=None,
+            anthropic_api_key=None,
+            disabled_providers=[],
+        )
+        assert ocr._vision_llm_ocr_sync("anything", cfg) == ""
+        assert called == [], "chat_completion must not be invoked when no model resolves"
+
 
 # ---------- extract_text_from_image (async orchestrator) -------------------
 

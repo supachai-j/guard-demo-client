@@ -70,11 +70,31 @@ def _try_tesseract(image_bytes: bytes) -> Optional[str]:
 
 
 def _vision_llm_ocr_sync(image_b64: str, cfg: Any) -> str:
-    """Blocking vision-LLM OCR. Run via executor from async callers."""
-    from . import llm_client
+    """Blocking vision-LLM OCR. Run via executor from async callers.
+
+    Model resolution goes through `llm_capabilities.resolve_ocr_model` so
+    a text-only active LLM (e.g. ThaiLLM) doesn't silently disable the
+    §4.3.14 image-injection pre-scan — we fall back to any configured
+    vision-capable provider instead."""
+    from . import llm_capabilities, llm_client
 
     if not llm_client.llm_credentials_configured(cfg):
         return ""
+
+    model, source = llm_capabilities.resolve_ocr_model(cfg)
+    if model is None:
+        logger.warning(
+            "OCR pre-scan skipped: no vision-capable model available "
+            "(active LLM is text-only and no fallback provider is configured). "
+            "Image-injection mitigation is OFF for this turn — configure an "
+            "OpenAI / Anthropic / Google key, or set cfg.ocr_model explicitly."
+        )
+        return ""
+
+    # Surface the resolved path in INFO so the operator can see which model
+    # is doing OCR and why (helpful when debugging guardrail false-negatives).
+    logger.info("OCR using model=%s (source=%s)", model, source)
+
     messages = [
         {"role": "system", "content": _OCR_SYSTEM},
         {"role": "user", "content": [
@@ -85,13 +105,13 @@ def _vision_llm_ocr_sync(image_b64: str, cfg: Any) -> str:
     try:
         resp = llm_client.chat_completion(
             messages=messages,
-            model=getattr(cfg, "openai_model", "gpt-4o"),
+            model=model,
             temperature=0,
             config=cfg,
         )
         return (resp["choices"][0]["message"].get("content") or "").strip()
     except Exception as e:  # noqa: BLE001
-        logger.warning("vision-LLM OCR failed: %s", e)
+        logger.warning("vision-LLM OCR failed (model=%s, source=%s): %s", model, source, e)
         return ""
 
 

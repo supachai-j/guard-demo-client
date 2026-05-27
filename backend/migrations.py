@@ -130,6 +130,11 @@ _MIGRATIONS = [
     ),
     Migration("tools", "gateway_url", "VARCHAR"),
     Migration("tools", "gateway_api_key", "VARCHAR"),
+    # Dedicated OCR model — null = auto-resolve (see llm_capabilities.
+    # resolve_ocr_model). Lets the operator demo a text-only LLM while
+    # keeping the §4.3.14 image-injection pre-scan working on a vision
+    # model.
+    Migration("app_config", "ocr_model", "VARCHAR"),
 ]
 
 

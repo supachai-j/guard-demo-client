@@ -20,6 +20,12 @@ class AppConfig(Base):
     logo_url = Column(String, nullable=True)
     system_prompt = Column(Text, nullable=True)
     openai_model = Column(String, default="gpt-4o-mini")
+    # Dedicated OCR model — null = auto (active LLM if vision-capable, else
+    # smart fallback to a configured vision provider). Kept separate from
+    # openai_model so the operator can demo a text-only LLM (e.g. ThaiLLM)
+    # without disabling the §4.3.14 image-injection pre-scan, which needs
+    # a vision model regardless of which LLM serves the user.
+    ocr_model = Column(String, nullable=True)
     temperature = Column(String, default="7")
     lakera_enabled = Column(Boolean, default=True)
     lakera_blocking_mode = Column(Boolean, default=False)
