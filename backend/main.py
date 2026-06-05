@@ -2,8 +2,9 @@ import logging
 import os
 import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine
@@ -29,6 +30,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Path-scoped permissive CORS for the Anthropic gateway shim (/v1/*). Anthropic
+# clients like Claude for Office run in a WebView and send a CORS preflight; the
+# locked-down CORSMiddleware above only allows localhost, so it answers their
+# OPTIONS with 400 and the browser reports "Load failed". The public gateway
+# (api.portkey.ai) returns `Access-Control-Allow-Origin: *`, so we mirror that
+# for /v1/* only — the Admin API's CORS posture is untouched. Added AFTER the
+# CORSMiddleware so it sits outermost and short-circuits the /v1 preflight first.
+@app.middleware("http")
+async def _gateway_cors(request: Request, call_next):
+    if not request.url.path.startswith("/v1/"):
+        return await call_next(request)
+    cors = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*"),
+        "Access-Control-Max-Age": "600",
+    }
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=cors)
+    response = await call_next(request)
+    for key, value in cors.items():
+        response.headers[key] = value
+    return response
 
 # Serve the bundled fake-company brand assets (logos / hero images) used by
 # the one-click scenario loader. Mounted at /static/fakecompanies/...
