@@ -10,7 +10,11 @@ the values — that needs a live key + request.
 
 from types import SimpleNamespace
 
-from backend.llm_client import _build_litellm_kwargs, _portkey_header_value
+from backend.llm_client import (
+    _build_litellm_kwargs,
+    _portkey_guardrail_block_status,
+    _portkey_header_value,
+)
 
 
 def _cfg(**fields):
@@ -82,3 +86,23 @@ def test_config_and_metadata_headers_absent_when_unset():
     headers = _portkey_kwargs()["extra_headers"]
     assert "x-portkey-config" not in headers
     assert "x-portkey-metadata" not in headers
+
+
+# ---------- gateway-guardrail block detection (HTTP 446) -----------------
+
+def test_guardrail_block_status_detected_from_446_message():
+    err = Exception(
+        "litellm.APIError: APIError: OpenAIException - The guardrail checks "
+        "defined in the config failed. You can find more information in the "
+        "`hook_results` object."
+    )
+    status = _portkey_guardrail_block_status(err)
+    assert status is not None
+    assert status["flagged"] is True
+    assert status["breakdown"][0]["detected"] is True
+    assert status["metadata"]["source"] == "portkey_gateway"
+
+
+def test_guardrail_block_status_none_for_unrelated_error():
+    assert _portkey_guardrail_block_status(Exception("rate limit exceeded")) is None
+    assert _portkey_guardrail_block_status(Exception("Invalid config id passed")) is None
