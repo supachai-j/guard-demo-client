@@ -26,6 +26,10 @@ SECRET_CONFIG_FIELDS = (
     "palo_alto_api_key",
     "portkey_api_key",
     "portkey_virtual_key",
+    # An inline-JSON Portkey Config can carry virtual keys / override_params
+    # with provider credentials, so mask it from the public read (a bare
+    # "pc-..." slug isn't sensitive, but we can't tell them apart cheaply).
+    "portkey_config",
     "thaillm_api_key",
     "kong_api_key",
     "cloudflare_api_token",

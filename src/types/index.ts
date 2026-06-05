@@ -47,6 +47,8 @@ export interface AppConfig {
   portkey_api_key?: string;
   portkey_virtual_key?: string;
   portkey_base_url?: string;
+  portkey_config?: string;
+  portkey_metadata?: string;
   // ThaiLLM (national Thai LLM gateway — OpenAI-compatible)
   thaillm_api_key?: string;
   thaillm_base_url?: string;
@@ -112,6 +114,8 @@ export interface AppConfigUpdate {
   portkey_api_key?: string;
   portkey_virtual_key?: string;
   portkey_base_url?: string;
+  portkey_config?: string;
+  portkey_metadata?: string;
   // ThaiLLM (national Thai LLM gateway — OpenAI-compatible)
   thaillm_api_key?: string;
   thaillm_base_url?: string;

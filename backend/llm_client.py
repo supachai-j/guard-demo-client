@@ -6,6 +6,7 @@ dispatch path, including tool-calling translation.
 """
 import ast
 import copy
+import json
 from typing import Any, Dict, List, Optional, Union
 
 import httpx
@@ -130,6 +131,23 @@ def _get_config() -> Optional[AppConfig]:
         db.close()
 
 
+def _portkey_header_value(raw: Optional[str]) -> Optional[str]:
+    """Header-safe value for x-portkey-config / x-portkey-metadata.
+
+    Portkey accepts a Config slug (e.g. "pc-abc") or an inline JSON object,
+    and Metadata as a JSON object. When the value parses as JSON we re-emit it
+    compactly so embedded whitespace/newlines can't corrupt the header; a
+    non-JSON slug passes through trimmed. Empty -> None (header omitted).
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        return json.dumps(json.loads(s), separators=(",", ":"))
+    except (ValueError, TypeError):
+        return s
+
+
 def _build_litellm_kwargs(
     cfg: Optional[AppConfig],
     model: str,
@@ -226,6 +244,15 @@ def _build_litellm_kwargs(
         virtual_key = getattr(cfg, "portkey_virtual_key", None)
         if virtual_key:
             extra_headers["x-portkey-virtual-key"] = virtual_key
+        # Gateway orchestration: a Config (slug like "pc-..." or inline JSON)
+        # drives fallbacks/retries/caching/guardrails; Metadata (JSON object)
+        # is attached to the Portkey request log. Both ride as headers.
+        config_header = _portkey_header_value(getattr(cfg, "portkey_config", None))
+        if config_header:
+            extra_headers["x-portkey-config"] = config_header
+        metadata_header = _portkey_header_value(getattr(cfg, "portkey_metadata", None))
+        if metadata_header:
+            extra_headers["x-portkey-metadata"] = metadata_header
         kwargs["extra_headers"] = extra_headers
         kwargs["custom_llm_provider"] = "openai"
     return kwargs
