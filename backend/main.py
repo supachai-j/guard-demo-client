@@ -39,6 +39,7 @@ if os.path.isdir(_fakecompanies_dir):
 
 # Route modules — each owns its own APIRouter with prefix. Add new endpoints
 # in the matching module under backend/routes/, not here.
+from .routes import anthropic_proxy as _anthropic_proxy_routes  # noqa: E402
 from .routes import audit as _audit_routes  # noqa: E402
 from .routes import auth as _auth_routes  # noqa: E402
 from .routes import catalogs as _catalogs_routes  # noqa: E402
@@ -72,6 +73,7 @@ app.include_router(_playbooks_routes.router)
 app.include_router(_playbook_runs_routes.router)
 app.include_router(_audit_routes.router)
 app.include_router(_threat_lab_routes.router)
+app.include_router(_anthropic_proxy_routes.router)
 
 
 # Re-export from the tiny config_redaction module so tests can import the
