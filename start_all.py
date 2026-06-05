@@ -14,6 +14,32 @@ import socket
 import urllib.request
 from pathlib import Path
 
+
+def _load_dotenv(path: Path) -> None:
+    """Minimal stdlib .env loader (no python-dotenv dependency).
+
+    The FastAPI app reads ADMIN_USER / ADMIN_PASSWORD / JWT_SECRET (and friends)
+    from os.environ at import time, but nothing loaded the .env file — so creds
+    set there were silently ignored and the app kept falling back to admin/admin
+    on every restart. Load .env here, before backend.* is imported. Real
+    environment variables win (setdefault), so an explicit export still
+    overrides the file.
+    """
+    if not path.exists():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, val)
+
+
+_load_dotenv(Path(__file__).resolve().parent / ".env")
+
 # Backend port — overridable via env so local dev can sidestep a port-8000
 # collision (e.g. another project's uvicorn) without editing source. Compose
 # threads the same env to the healthcheck + frontend proxy so flipping
