@@ -8,12 +8,12 @@ headers `llm_client` injects, the config-driven model override, and the two
 independent guardrail layers.
 
 > Reflects the live integration: `llm_provider=portkey`,
-> `portkey_config=pc-guardr-43a76e` (Prisma AIRS guardrails, **monitor mode** —
-> `deny:false`) **+** `portkey_virtual_key=gemini-25-flash-fc331e` →
-> `gemini-2.5-flash`. A guardrail-only config has no model target, so it needs a
-> virtual key alongside it. Use the config **slug** (`pc-...`), not its display
-> name. Swap the config / virtual key and only the **Portkey gateway** box
-> changes — the rest of the path is identical.
+> `portkey_config=pc-poc-gw-8ce0e7` (config **poc-gw-guardrail** — *self-contained*:
+> targets `gemini-2.5-flash` **and** applies Prisma AIRS input/output guardrails,
+> so no separate virtual key is needed). Use the config **slug** (`pc-...`), not
+> its display name. A guardrail-*only* config (e.g. `pc-guardr-43a76e`) has no
+> model target and must be paired with a virtual key instead. Swap the config and
+> only the **Portkey gateway** box changes — the rest of the path is identical.
 
 ---
 
@@ -37,7 +37,7 @@ flowchart TB
     end
 
     subgraph GW["🛡️ Portkey gateway · api.portkey.ai"]
-        CFG["config (slug pc-...)<br/>e.g. pc-guardr-43a76e → Prisma AIRS guardrails (monitor)<br/>+ virtual key gemini-25-flash-fc331e → gemini-2.5-flash<br/>(config may add timeout/fallback/cache/model override)"]
+        CFG["config (slug pc-...)<br/>e.g. pc-poc-gw-8ce0e7 (poc-gw-guardrail)<br/>targets gemini-2.5-flash + Prisma AIRS guardrails<br/>(self-contained: no separate virtual key)"]
     end
 
     subgraph UP["🤖 Upstream LLM"]
@@ -78,7 +78,7 @@ sequenceDiagram
     B->>B: RAG retrieve + tools manifest + build messages
     B->>L: chat_completion(model, msgs, config)
     L->>P: POST /v1/chat/completions (+ x-portkey-api-key / -config / -metadata)
-    Note over P: apply config pc-guardr-43a76e (Prisma AIRS guardrails)<br/>+ virtual key → gemini-2.5-flash<br/>(guardrail monitor-mode: scores, does not block)
+    Note over P: apply config pc-poc-gw-8ce0e7 (poc-gw-guardrail)<br/>route → gemini-2.5-flash + Prisma AIRS guardrails<br/>(guardrail blocks only with a valid AIRS key)
     P->>M: routed request
     M-->>P: completion
     P-->>L: OpenAI-shaped response (provider=google)
