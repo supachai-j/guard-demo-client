@@ -75,18 +75,14 @@ def _routing_headers(cfg: AppConfig) -> Dict[str, str]:
     return headers
 
 
-@router.post("/v1/messages")
-async def anthropic_messages(request: Request, db: Session = Depends(get_db)):
-    if not _proxy_enabled():
-        # Hide the relay entirely when disabled.
-        return JSONResponse(status_code=404, content={"type": "error", "error": {"message": "Not found"}})
+def _authenticate(request: Request, cfg) -> Any:
+    """Validate the client's x-api-key (or Bearer) against the Portkey key.
 
-    cfg = db.query(AppConfig).first()
+    Returns the Portkey key on success, or a JSONResponse error to short-circuit.
+    """
     portkey_key = (getattr(cfg, "portkey_api_key", None) or "").strip() if cfg else ""
     if not portkey_key:
         return _anthropic_error(503, "Portkey is not configured on this gateway shim.")
-
-    # Auth: the client must present the Portkey key in x-api-key (or Bearer).
     presented = (request.headers.get("x-api-key") or "").strip()
     if not presented:
         auth = request.headers.get("authorization") or ""
@@ -94,6 +90,45 @@ async def anthropic_messages(request: Request, db: Session = Depends(get_db)):
             presented = auth[7:].strip()
     if not presented or not hmac.compare_digest(presented, portkey_key):
         return _anthropic_error(401, "Invalid API key for this gateway.")
+    return portkey_key
+
+
+# Anthropic-style model list for the gateway connectivity / bootstrap probe.
+# The active Portkey config overrides the model to whatever it targets
+# (gemini today), so these ids are what the client offers in its picker.
+_MODELS = [
+    {"type": "model", "id": "claude-3-5-sonnet-20241022", "display_name": "Claude 3.5 Sonnet", "created_at": "2024-10-22T00:00:00Z"},
+    {"type": "model", "id": "claude-3-5-haiku-20241022", "display_name": "Claude 3.5 Haiku", "created_at": "2024-10-22T00:00:00Z"},
+    {"type": "model", "id": "claude-3-opus-20240229", "display_name": "Claude 3 Opus", "created_at": "2024-02-29T00:00:00Z"},
+]
+
+
+@router.get("/v1/models")
+async def anthropic_models(request: Request, db: Session = Depends(get_db)):
+    if not _proxy_enabled():
+        return JSONResponse(status_code=404, content={"type": "error", "error": {"message": "Not found"}})
+    auth = _authenticate(request, db.query(AppConfig).first())
+    if isinstance(auth, JSONResponse):
+        return auth
+    return JSONResponse({
+        "data": _MODELS,
+        "has_more": False,
+        "first_id": _MODELS[0]["id"],
+        "last_id": _MODELS[-1]["id"],
+    })
+
+
+@router.post("/v1/messages")
+async def anthropic_messages(request: Request, db: Session = Depends(get_db)):
+    if not _proxy_enabled():
+        # Hide the relay entirely when disabled.
+        return JSONResponse(status_code=404, content={"type": "error", "error": {"message": "Not found"}})
+
+    cfg = db.query(AppConfig).first()
+    auth = _authenticate(request, cfg)
+    if isinstance(auth, JSONResponse):
+        return auth
+    portkey_key = auth
 
     raw_body = await request.body()
     try:

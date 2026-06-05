@@ -41,17 +41,28 @@ app.add_middleware(
 # CORSMiddleware so it sits outermost and short-circuits the /v1 preflight first.
 @app.middleware("http")
 async def _gateway_cors(request: Request, call_next):
-    if not request.url.path.startswith("/v1/"):
+    path = request.url.path
+    # Anthropic clients append the full path (/v1/models, /v1/messages) to the
+    # configured base URL. If the operator set that base URL to ".../v1"
+    # (the natural thing to do), the request arrives doubled as /v1/v1/...
+    # Collapse it so the shim works whether or not the base URL includes /v1.
+    if path.startswith("/v1/v1/"):
+        path = path[3:]
+        request.scope["path"] = path
+        request.scope["raw_path"] = path.encode()
+    if not path.startswith("/v1/"):
         return await call_next(request)
     cors = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
         "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*"),
         "Access-Control-Max-Age": "600",
     }
     if request.method == "OPTIONS":
+        logging.getLogger("gateway").info("GW %s %s -> 204 (preflight)", request.method, path)
         return Response(status_code=204, headers=cors)
     response = await call_next(request)
+    logging.getLogger("gateway").info("GW %s %s -> %s", request.method, path, response.status_code)
     for key, value in cors.items():
         response.headers[key] = value
     return response
