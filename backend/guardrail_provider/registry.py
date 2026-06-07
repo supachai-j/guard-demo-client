@@ -14,6 +14,7 @@ from .cloudflare_provider import CloudflareFirewallForAIProvider
 from .lakera_provider import LakeraProvider
 from .openai_moderation_provider import OpenAIModerationProvider
 from .palo_alto_provider import PaloAltoAirsProvider
+from .portkey_provider import PortkeyGuardrailProvider
 
 GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
     LakeraProvider.id: LakeraProvider(),
@@ -22,6 +23,7 @@ GUARDRAIL_PROVIDERS: Dict[str, GuardrailProvider] = {
     AzureContentSafetyProvider.id: AzureContentSafetyProvider(),
     PaloAltoAirsProvider.id: PaloAltoAirsProvider(),
     CloudflareFirewallForAIProvider.id: CloudflareFirewallForAIProvider(),
+    PortkeyGuardrailProvider.id: PortkeyGuardrailProvider(),
 }
 
 
@@ -101,6 +103,14 @@ _PROVIDER_UI_FIELDS: Dict[str, Dict[str, Any]] = {
         ],
         "docs_url": "https://developers.cloudflare.com/ai-gateway/firewall-for-ai/",
         "summary": "Calls Workers AI @cf/meta/llama-guard-3-8b (MLCommons S1–S14 taxonomy). Routes through AI Gateway when a gateway ID is set.",
+    },
+    "portkey_guardrail": {
+        "fields": [
+            {"name": "portkey_api_key", "label": "Portkey API Key", "type": "password", "placeholder": "your Portkey API key"},
+            {"name": "portkey_config", "label": "Portkey Config slug (with guardrails)", "type": "text", "placeholder": "pc-..."},
+        ],
+        "docs_url": "https://portkey.ai/docs/product/guardrails",
+        "summary": "Runs the prompt through the Portkey gateway using the configured Config's input guardrails and reads hook_results (HTTP 446 / verdict:false = flagged). Inline with a completion, so it calls the LLM (max_tokens=1) and is rpm-bound by the Config's virtual key — unlike the guardrail-only providers.",
     },
 }
 

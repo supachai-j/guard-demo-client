@@ -59,6 +59,8 @@ class AppConfigResponse(AppConfigBase):
     portkey_api_key: Optional[str] = None
     portkey_virtual_key: Optional[str] = None
     portkey_base_url: Optional[str] = None
+    portkey_config: Optional[str] = None
+    portkey_metadata: Optional[str] = None
     thaillm_api_key: Optional[str] = None
     thaillm_base_url: Optional[str] = None
     kong_api_key: Optional[str] = None
@@ -105,6 +107,8 @@ class AppConfigUpdate(AppConfigBase):
     portkey_api_key: Optional[str] = None
     portkey_virtual_key: Optional[str] = None
     portkey_base_url: Optional[str] = None
+    portkey_config: Optional[str] = None
+    portkey_metadata: Optional[str] = None
     thaillm_api_key: Optional[str] = None
     thaillm_base_url: Optional[str] = None
     kong_api_key: Optional[str] = None

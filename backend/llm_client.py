@@ -6,13 +6,14 @@ dispatch path, including tool-calling translation.
 """
 import ast
 import copy
+import json
 from typing import Any, Dict, List, Optional, Union
 
 import httpx
 import litellm
 from litellm import completion as litellm_completion
 from litellm import embedding as litellm_embedding
-from litellm.exceptions import APIConnectionError, BadRequestError
+from litellm.exceptions import APIConnectionError, APIError, BadRequestError
 
 from .database import get_db
 from .models import AppConfig
@@ -105,6 +106,35 @@ def _extract_litellm_guardrail_status(err: Exception) -> Optional[Dict[str, Any]
     return None
 
 
+def _portkey_guardrail_block_status(err: Exception) -> Optional[Dict[str, Any]]:
+    """Detect a Portkey gateway-guardrail block (HTTP 446) from a litellm error.
+
+    When a guardrail in the active Portkey Config denies a request, Portkey
+    returns 446 and litellm raises APIError with the message "The guardrail
+    checks defined in the config failed …". litellm drops the response body, so
+    the detailed hook_results aren't reachable here — we key on that signature
+    and synthesize a Lakera-shaped flagged status so the chat path can render
+    the same graceful "moderated" message it uses for every other guardrail,
+    instead of leaking a raw litellm.APIError to the user.
+    """
+    msg = (getattr(err, "message", None) or str(err) or "").lower()
+    if "guardrail checks defined in the config failed" not in msg and "hook_results" not in msg:
+        return None
+    return {
+        "flagged": True,
+        "breakdown": [{
+            "project_id": None,
+            "policy_id": "portkey-gateway",
+            "detector_id": "portkey-config-guardrail",
+            "detector_type": "prompt_attack",
+            "detected": True,
+            "message_id": 0,
+        }],
+        "payload": [],
+        "metadata": {"source": "portkey_gateway", "note": "blocked by the Portkey config's guardrail"},
+    }
+
+
 def effective_llm_api_key(cfg: Optional[AppConfig]) -> Optional[str]:
     """Bearer / API key for the active provider (None for ones that don't need one)."""
     return provider_api_key(cfg)
@@ -128,6 +158,23 @@ def _get_config() -> Optional[AppConfig]:
         return db.query(AppConfig).first()
     finally:
         db.close()
+
+
+def _portkey_header_value(raw: Optional[str]) -> Optional[str]:
+    """Header-safe value for x-portkey-config / x-portkey-metadata.
+
+    Portkey accepts a Config slug (e.g. "pc-abc") or an inline JSON object,
+    and Metadata as a JSON object. When the value parses as JSON we re-emit it
+    compactly so embedded whitespace/newlines can't corrupt the header; a
+    non-JSON slug passes through trimmed. Empty -> None (header omitted).
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    try:
+        return json.dumps(json.loads(s), separators=(",", ":"))
+    except (ValueError, TypeError):
+        return s
 
 
 def _build_litellm_kwargs(
@@ -226,6 +273,15 @@ def _build_litellm_kwargs(
         virtual_key = getattr(cfg, "portkey_virtual_key", None)
         if virtual_key:
             extra_headers["x-portkey-virtual-key"] = virtual_key
+        # Gateway orchestration: a Config (slug like "pc-..." or inline JSON)
+        # drives fallbacks/retries/caching/guardrails; Metadata (JSON object)
+        # is attached to the Portkey request log. Both ride as headers.
+        config_header = _portkey_header_value(getattr(cfg, "portkey_config", None))
+        if config_header:
+            extra_headers["x-portkey-config"] = config_header
+        metadata_header = _portkey_header_value(getattr(cfg, "portkey_metadata", None))
+        if metadata_header:
+            extra_headers["x-portkey-metadata"] = metadata_header
         kwargs["extra_headers"] = extra_headers
         kwargs["custom_llm_provider"] = "openai"
     return kwargs
@@ -280,6 +336,23 @@ def chat_completion(
             if lakera_status:
                 raise LiteLLMGuardrailError(
                     "LiteLLM guardrail blocked this response.", lakera_status
+                ) from e
+        if pid == "portkey":
+            pk_status = _portkey_guardrail_block_status(e)
+            if pk_status:
+                raise LiteLLMGuardrailError(
+                    "Portkey gateway guardrail blocked this request.", pk_status
+                ) from e
+        raise Exception(f"LLM API error: {e}") from e
+    except APIError as e:
+        # Portkey returns HTTP 446 when a Config guardrail denies; litellm wraps
+        # it as APIError (not BadRequestError). Convert to the graceful block so
+        # the chat path renders a "moderated" message instead of a raw error.
+        if pid == "portkey":
+            pk_status = _portkey_guardrail_block_status(e)
+            if pk_status:
+                raise LiteLLMGuardrailError(
+                    "Portkey gateway guardrail blocked this request.", pk_status
                 ) from e
         raise Exception(f"LLM API error: {e}") from e
 
@@ -337,6 +410,20 @@ def chat_completion_stream(
             if lakera_status:
                 raise LiteLLMGuardrailError(
                     "LiteLLM guardrail blocked this response.", lakera_status
+                ) from e
+        if pid == "portkey":
+            pk_status = _portkey_guardrail_block_status(e)
+            if pk_status:
+                raise LiteLLMGuardrailError(
+                    "Portkey gateway guardrail blocked this request.", pk_status
+                ) from e
+        raise Exception(f"LLM API error: {e}") from e
+    except APIError as e:
+        if pid == "portkey":
+            pk_status = _portkey_guardrail_block_status(e)
+            if pk_status:
+                raise LiteLLMGuardrailError(
+                    "Portkey gateway guardrail blocked this request.", pk_status
                 ) from e
         raise Exception(f"LLM API error: {e}") from e
 

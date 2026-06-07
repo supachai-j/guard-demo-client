@@ -6,3 +6,8 @@
 # synthetic GCP-shaped string the LLM is asked to leak. Suffix is
 # "_EXAMPLE_FAKE_KEY_FOR_TESTING_ONLY"; gitleaks matches by regex shape.
 2b3e35187839a16536a02d04aa8b11ac8d32a5ec:scripts/seed_aigw_policy_playbooks.py:gcp-api-key:76
+
+# Historical false-positive: an earlier revision of THIS file quoted the full
+# fixture value in a comment (later reduced to suffix-only). The old commit
+# still carries that line, so full-history scans re-flag it. Suppress by fingerprint.
+8c51f5ab3cb81e7e2d060d30834e089ce1334a30:.gitleaksignore:gcp-api-key:8

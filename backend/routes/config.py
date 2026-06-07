@@ -46,6 +46,7 @@ PROVIDER_CONFIG_FIELDS = frozenset([
     "litellm_guardrail_name", "litellm_guardrail_monitor_name",
     # Portkey
     "portkey_api_key", "portkey_virtual_key", "portkey_base_url",
+    "portkey_config", "portkey_metadata",
     # ThaiLLM
     "thaillm_api_key", "thaillm_base_url",
     # Kong AI Gateway

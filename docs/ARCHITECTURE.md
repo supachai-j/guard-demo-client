@@ -101,6 +101,10 @@ flowchart TB
 
 ## Chat request flow
 
+> For the Portkey gateway egress detail (gateway hop, injected headers,
+> config-driven model override, and the two guardrail layers), see
+> [Traffic flow](TRAFFIC_FLOW.md).
+
 ```mermaid
 sequenceDiagram
     autonumber
@@ -194,6 +198,7 @@ the OCR stage itself can't be turned into an injection executor. Wired into:
 
 ## Related docs
 
+- [Traffic flow](TRAFFIC_FLOW.md) — Portkey gateway egress + guardrail layering
 - [API reference](API.md) — every `/api/*` endpoint
 - [Project structure](PROJECT_STRUCTURE.md) — code layout
 - [Configuration](CONFIGURATION.md) — Admin tab walkthrough + export/import

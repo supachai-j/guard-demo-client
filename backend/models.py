@@ -70,6 +70,10 @@ class AppConfig(Base):
     portkey_api_key = Column(String, nullable=True)
     portkey_virtual_key = Column(String, nullable=True)
     portkey_base_url = Column(String, nullable=True)
+    # Gateway orchestration: Config slug/inline-JSON (x-portkey-config) and
+    # request Metadata JSON (x-portkey-metadata). Not secrets — see redaction.
+    portkey_config = Column(String, nullable=True)
+    portkey_metadata = Column(String, nullable=True)
     # ThaiLLM (national Thai LLM gateway — OpenAI-compatible custom endpoint,
     # used when llm_provider="thaillm"). Default base URL applied in providers.py.
     thaillm_api_key = Column(String, nullable=True)

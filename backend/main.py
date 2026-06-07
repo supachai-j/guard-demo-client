@@ -2,8 +2,9 @@ import logging
 import os
 import sys
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from .database import engine
@@ -30,6 +31,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# Path-scoped permissive CORS for the Anthropic gateway shim (/v1/*). Anthropic
+# clients like Claude for Office run in a WebView and send a CORS preflight; the
+# locked-down CORSMiddleware above only allows localhost, so it answers their
+# OPTIONS with 400 and the browser reports "Load failed". The public gateway
+# (api.portkey.ai) returns `Access-Control-Allow-Origin: *`, so we mirror that
+# for /v1/* only — the Admin API's CORS posture is untouched. Added AFTER the
+# CORSMiddleware so it sits outermost and short-circuits the /v1 preflight first.
+@app.middleware("http")
+async def _gateway_cors(request: Request, call_next):
+    path = request.url.path
+    # Anthropic clients append the full path (/v1/models, /v1/messages) to the
+    # configured base URL. If the operator set that base URL to ".../v1"
+    # (the natural thing to do), the request arrives doubled as /v1/v1/...
+    # Collapse it so the shim works whether or not the base URL includes /v1.
+    if path.startswith("/v1/v1/"):
+        path = path[3:]
+        request.scope["path"] = path
+        request.scope["raw_path"] = path.encode()
+    if not path.startswith("/v1/"):
+        return await call_next(request)
+    cors = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": request.headers.get("access-control-request-headers", "*"),
+        "Access-Control-Max-Age": "600",
+    }
+    if request.method == "OPTIONS":
+        logging.getLogger("gateway").info("GW %s %s -> 204 (preflight)", request.method, path)
+        return Response(status_code=204, headers=cors)
+    response = await call_next(request)
+    logging.getLogger("gateway").info("GW %s %s -> %s", request.method, path, response.status_code)
+    for key, value in cors.items():
+        response.headers[key] = value
+    return response
+
 # Serve the bundled fake-company brand assets (logos / hero images) used by
 # the one-click scenario loader. Mounted at /static/fakecompanies/...
 _fakecompanies_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "fakecompanies")
@@ -39,6 +76,7 @@ if os.path.isdir(_fakecompanies_dir):
 
 # Route modules — each owns its own APIRouter with prefix. Add new endpoints
 # in the matching module under backend/routes/, not here.
+from .routes import anthropic_proxy as _anthropic_proxy_routes  # noqa: E402
 from .routes import audit as _audit_routes  # noqa: E402
 from .routes import auth as _auth_routes  # noqa: E402
 from .routes import catalogs as _catalogs_routes  # noqa: E402
@@ -72,6 +110,7 @@ app.include_router(_playbooks_routes.router)
 app.include_router(_playbook_runs_routes.router)
 app.include_router(_audit_routes.router)
 app.include_router(_threat_lab_routes.router)
+app.include_router(_anthropic_proxy_routes.router)
 
 
 # Re-export from the tiny config_redaction module so tests can import the

@@ -91,6 +91,8 @@ _MIGRATIONS = [
     Migration("app_config", "portkey_api_key", "VARCHAR"),
     Migration("app_config", "portkey_virtual_key", "VARCHAR"),
     Migration("app_config", "portkey_base_url", "VARCHAR"),
+    Migration("app_config", "portkey_config", "VARCHAR"),
+    Migration("app_config", "portkey_metadata", "VARCHAR"),
     Migration("app_config", "cloudflare_account_id", "VARCHAR"),
     Migration("app_config", "cloudflare_api_token", "VARCHAR"),
     Migration("app_config", "cloudflare_gateway_id", "VARCHAR"),

@@ -1417,6 +1417,8 @@ const PROVIDER_FIELD_SCHEMAS: Record<string, ProviderFieldDef[]> = {
     { field: 'portkey_api_key', label: 'Portkey API Key', type: 'password', required: true },
     { field: 'portkey_virtual_key', label: 'Portkey Virtual Key', type: 'password' },
     { field: 'portkey_base_url', label: 'Portkey Base URL', type: 'text', placeholder: 'https://api.portkey.ai/v1' },
+    { field: 'portkey_config', label: 'Portkey Config', type: 'text', placeholder: 'pc-xxxx or inline JSON', help: 'Optional — use the Config SLUG (pc-...), NOT its display name, or inline JSON. Drives fallbacks/retries/caching/guardrails. A guardrail-only config also needs a Virtual Key (model target). Sent as x-portkey-config.' },
+    { field: 'portkey_metadata', label: 'Portkey Metadata (JSON)', type: 'text', placeholder: '{"_user":"demo"}', help: 'Optional — JSON object attached to the Portkey request log. Sent as x-portkey-metadata. Must be valid JSON.' },
   ],
   thaillm: [
     { field: 'thaillm_api_key', label: 'ThaiLLM API Key', type: 'password', help: 'Optional — leave blank if the endpoint is open' },
