@@ -644,7 +644,11 @@ async def import_config(file: UploadFile = File(...), db: Session = Depends(get_
 
 
 # Legacy export/import — kept for backward compatibility, not used by current UI.
-@router.get("/api/export")
+# Admin-only: unlike GET /api/config (which redacts via the mask-list), this
+# returns the raw AppConfig including every credential column, so leaving it
+# unauthenticated leaks all provider keys to anyone who can reach the host
+# (e.g. a public Tailscale funnel). Gate it like /api/config/export.
+@router.get("/api/export", dependencies=[Depends(_auth.require_admin)])
 async def legacy_export_config(db: Session = Depends(get_db)):
     config = db.query(AppConfig).first()
     tools = db.query(Tool).all()
@@ -653,7 +657,7 @@ async def legacy_export_config(db: Session = Depends(get_db)):
     return {"config": config, "tools": tools, "rag_sources": rag_sources}
 
 
-@router.post("/api/import")
+@router.post("/api/import", dependencies=[Depends(_auth.require_admin)])
 async def legacy_import_config(data: dict, db: Session = Depends(get_db)):
     # Placeholder for import functionality
     return {"message": "Import functionality needs to be implemented"}
