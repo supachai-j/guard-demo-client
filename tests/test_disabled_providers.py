@@ -115,6 +115,21 @@ def test_disable_a_provider(client: TestClient, seeded_db: Session):
     assert lk["enabled"] is True
 
 
+def test_disabled_providers_deduped_on_save(client: TestClient):
+    """The Admin Console toggle appended to disabled_providers without a
+    membership check, so a stale/double toggle accumulated duplicates
+    (['groq', 'groq', 'groq'] seen in the wild). update_config must de-dupe
+    on save, preserving first-seen order."""
+    resp = client.put(
+        "/api/config",
+        json={"disabled_providers": ["groq", "groq", "openai", "groq", "openai"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["disabled_providers"] == ["groq", "openai"]
+    # Persisted (not just echoed) — a fresh GET is still de-duped.
+    assert client.get("/api/config").json()["disabled_providers"] == ["groq", "openai"]
+
+
 def test_round_trip_enable_disable(client: TestClient):
     client.put("/api/config", json={"disabled_providers": ["mistral"]})
     listing = client.get("/api/providers").json()["providers"]

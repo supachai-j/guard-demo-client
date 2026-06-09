@@ -108,6 +108,13 @@ async def update_config(config_update: AppConfigUpdate, db: Session = Depends(ge
 
     payload = config_update.dict(exclude_unset=True)
 
+    # The Admin Console's per-provider toggle appends to disabled_providers
+    # without a membership check, so a stale/double toggle can accumulate
+    # duplicates (['groq', 'groq', 'groq'] seen in the wild). De-dupe on save,
+    # preserving order, so the stored list stays clean regardless of client.
+    if isinstance(payload.get("disabled_providers"), list):
+        payload["disabled_providers"] = list(dict.fromkeys(payload["disabled_providers"]))
+
     # Demo-safe lock — when the stored row says provider_config_locked=True,
     # reject any attempt to CHANGE a provider-related field. We compare value
     # (not just key presence) so the existing frontend pattern of "send all
