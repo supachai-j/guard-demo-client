@@ -1583,7 +1583,7 @@ const ProvidersTab: React.FC<ProvidersTabProps> = ({
 
   const toggleEnabled = async (id: string, currentEnabled: boolean) => {
     const next = currentEnabled
-      ? [...disabledList, id]
+      ? [...new Set([...disabledList, id])]
       : disabledList.filter(x => x !== id);
     await onConfigUpdate({ disabled_providers: next } as any);
   };

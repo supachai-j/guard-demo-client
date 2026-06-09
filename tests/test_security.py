@@ -79,6 +79,27 @@ def test_mask_list_has_no_duplicates():
     )
 
 
+def test_legacy_export_import_require_admin():
+    """GET /api/export / POST /api/import returned the raw AppConfig (every
+    credential column) with NO auth and NO redaction — bypassing both the
+    mask-list that guards GET /api/config and the require_admin on
+    /api/config/export. On a public deploy that leaks every provider key.
+    Found 2026-06-07 smoke-testing a public Tailscale-funnel deploy. These
+    legacy routes must depend on require_admin like their modern siblings."""
+    # Function-level import keeps this module's import light (the tests above
+    # deliberately avoid loading the full app / chromadb).
+    from backend import auth as _auth
+    from backend.main import app
+
+    guarded = {
+        route.path: any(d.call is _auth.require_admin for d in route.dependant.dependencies)
+        for route in app.routes
+        if getattr(route, "path", None) in {"/api/export", "/api/import"}
+    }
+    assert guarded.get("/api/export") is True, "GET /api/export must require admin"
+    assert guarded.get("/api/import") is True, "POST /api/import must require admin"
+
+
 def test_auth_status_payload_shape():
     """Login banner relies on /api/auth/status returning these three fields.
     Renaming any of them silently breaks the warn-default-password UX."""
